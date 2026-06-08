@@ -177,6 +177,43 @@ curl -s http://127.0.0.1:8000/health
 curl -s http://127.0.0.1:8000/memory/summary
 ```
 
+## Frontend MVP
+
+当前仓库包含一个 Vue 3 + Vite 单页前端 MVP，主入口是 `POST /research/query`。
+
+当前前端范围：
+
+- 页面加载时调用 `GET /health` 显示 backend status
+- 查询工作台把 unified workflow 分成 `knowledge` 和 `discovery` 两个 section
+- `discovery.candidates` 只表示推荐阅读候选，不等同于 grounded answer sources
+- `knowledge.sources` 只表示已 `embedded` 本地知识库证据
+- candidates 面板支持调用：
+  - `GET /papers/candidates`
+  - `POST /papers/{paper_id}/accept`
+  - `POST /papers/{paper_id}/upload_pdf`
+  - `POST /papers/{paper_id}/embed`
+
+运行方式：
+
+```bash
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1
+```
+
+默认前后端地址：
+
+- `VITE_API_BASE_URL=http://127.0.0.1:8000`
+
+构建：
+
+```bash
+cd frontend
+npm run build
+```
+
+这个前端目前是工程化工作台 MVP，用于联调当前后端 contract，不应理解为生产级前端。
+
 ## Tests
 
 当前推荐测试命令：
@@ -208,7 +245,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest \
 - 真实的 LLM / RAG query planning agent
 - 外网依赖下的稳定 search 集成测试
 - 完整 RAG 查询链路，以及 `/search` 到 retrieval 的联动
-- 前端界面
+- 生产级前端界面
 - 数据库迁移机制
 
 ## Retrieval MVP
