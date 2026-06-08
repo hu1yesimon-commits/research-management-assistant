@@ -188,6 +188,9 @@ FastAPI 第一阶段接口建议：
   - 输入：PDF 文件
   - 输出：入库状态
 
+- `POST /papers/{paper_id}/embed`
+  - 作用：对 `uploaded` 论文执行 `uploaded -> chunked` 的文本抽取和 chunk 持久化；对 `chunked` 论文执行 `chunked -> embedded` 的真实 embedding 与 `vector_ref` 写回
+
 - `POST /logs`
   - 输入：实验日志文本和可选标签
   - 输出：保存结果
@@ -197,6 +200,14 @@ FastAPI 第一阶段接口建议：
 
 - `GET /memory/summary`
   - 输出：用户当前科研记忆摘要，供调试和前端展示
+
+- `POST /knowledge/search`
+  - 输入：`query`、`top_k`
+  - 输出：已 `embedded` 知识块的 retrieval 结果
+
+- `POST /knowledge/answer`
+  - 输入：`question`、`top_k`
+  - 输出：基于 retrieval sources 的 grounded answer；默认模式仍是 deterministic
 
 ## 8. Vue MVP
 
@@ -267,7 +278,8 @@ FastAPI 第一阶段接口建议：
 - 候选论文能被保存。
 - 已入库 DOI 不会重复出现。
 - 能写实验日志。
-- 能上传 PDF 并完成 `uploaded -> chunked` 的文本抽取与切块持久化。
+- 能上传 PDF，并完成 `uploaded -> chunked -> embedded` 的分阶段知识库入库。
+- 已 `embedded` 的知识块能被 `/knowledge/search` 检索，并支持 `/knowledge/answer` 的 grounded answer 主路径。
 
 第八步：MVP 后增强 SSE。
 

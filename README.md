@@ -41,6 +41,8 @@
   输入 `{"query":"...","top_k":5}`，对已 `embedded` 的知识块执行 retrieval MVP，返回 chunk / paper 信息；当前只做召回，不做 RAG answer generation 或 LLM 总结
 - `POST /knowledge/answer`
   输入 `{"question":"...","top_k":5}`，基于 retrieval 结果返回 grounded answer MVP；当前默认使用 deterministic fake answer generator，不调用真实 LLM
+- `POST /research/query`
+  输入 `{"query":"...","mode":"basic"|"advanced","include_discovery":true,"include_knowledge":true,"top_k":5}`，把外部 discovery 和内部 knowledge answer 编排到一个响应中；`discovery.candidates` 不是 grounded answer sources，`knowledge.sources` 只来自已 `embedded` 的知识块
 
 ## Persistence
 
@@ -73,7 +75,7 @@
 
 推荐路径：
 
-`candidate -> accept -> accepted -> upload_pdf -> uploaded -> embed -> chunked`
+`candidate -> accept -> accepted -> upload_pdf -> uploaded -> embed -> chunked -> embed -> embedded`
 
 当前代码允许的可选路径还包括：
 
@@ -94,7 +96,7 @@
 
 推荐使用路径：
 
-`candidate -> accept -> accepted -> upload_pdf -> uploaded -> embed -> chunked`
+`candidate -> accept -> accepted -> upload_pdf -> uploaded -> embed -> chunked -> embed -> embedded`
 
 当前实际行为：
 
@@ -119,7 +121,7 @@
 
 当前还没有做：
 
-- retrieval / RAG / vector search API
+- 生产级 RAG answer generation
 - `/search` 与 Chroma retrieval 的联动
 - PDF 内容和 paper metadata 的一致性校验
 - OCR
@@ -205,7 +207,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest \
 - 真实 LLM judging
 - 真实的 LLM / RAG query planning agent
 - 外网依赖下的稳定 search 集成测试
-- retrieval / RAG 查询链路
+- 完整 RAG 查询链路，以及 `/search` 到 retrieval 的联动
 - 前端界面
 - 数据库迁移机制
 
@@ -235,9 +237,21 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest \
 当前仍然不是生产级 RAG：
 
 - 默认不调用真实 LLM
+- 真实 answer provider 只在显式配置时启用，不属于默认离线路径
 - 未实现多轮 chat
 - 未实现 streaming / SSE
-- 未实现 answer generation 的真实模型接入
+- 不保证真实 LLM answer provider 已达到生产级质量
+
+## Unified Research Query Workflow
+
+当前 Phase 2H 已实现一个轻量 orchestration endpoint：
+
+- `POST /research/query` 可在一个响应里同时返回：
+  - 外部 discovery candidates
+  - 内部 knowledge grounded answer
+- `discovery` 和 `knowledge` 会分成两个独立 section
+- discovery candidates 不会被当作 grounded answer sources
+- `knowledge.answer` 与 `knowledge.sources` 只来自已 `embedded` 的 knowledge chunks
 
 ## Vector Backend
 
