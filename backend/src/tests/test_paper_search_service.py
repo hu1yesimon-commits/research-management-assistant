@@ -89,6 +89,11 @@ class FakeOpenAlexTopResultPatch:
         }
 
 
+class FakeOpenAlexCrash:
+    def enrich_by_title(self, title: str) -> dict | None:
+        raise AttributeError("'NoneType' object has no attribute 'get'")
+
+
 def test_search_logs_arxiv_failure_reason(capsys):
     service = PaperSearchService(arxiv=FakeArxivEmpty(), openalex=FakeOpenAlexMissing())
 
@@ -159,3 +164,83 @@ def test_openalex_normalize_title_handles_case_whitespace_and_basic_punctuation(
     assert left == "the reconstruction of graphs"
     assert right == "the reconstruction of graphs"
     assert third == "the reconstruction of graphs"
+
+
+def test_openalex_enrich_handles_missing_nested_fields_without_crashing(monkeypatch):
+    adapter = OpenAlexAdapter()
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "meta": {"count": 1},
+                "results": [
+                    {
+                        "id": None,
+                        "doi": "https://doi.org/10.1000/example",
+                        "display_name": "Graph Reconstruction via Example",
+                        "primary_location": {"source": None},
+                        "open_access": None,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("services.adapters.openalex_adapter.requests.get", lambda *args, **kwargs: DummyResponse())
+    adapter.rate_limit = 0
+
+    patch = adapter.enrich_by_title("Graph Reconstruction via Example")
+
+    assert patch is not None
+    assert patch["doi"] == "10.1000/example"
+    assert patch["venue"] is None
+    assert patch["venue_type"] is None
+    assert patch["publisher"] is None
+    assert patch["is_open_access"] is None
+    assert patch["openalex_id"] is None
+    assert patch["match_type"] == "exact_normalized"
+
+
+def test_openalex_enrich_handles_primary_location_none_without_crashing(monkeypatch):
+    adapter = OpenAlexAdapter()
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "meta": {"count": 1},
+                "results": [
+                    {
+                        "id": "https://openalex.org/W123",
+                        "display_name": "Graph Reconstruction via Example",
+                        "primary_location": None,
+                        "open_access": {"is_oa": True},
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("services.adapters.openalex_adapter.requests.get", lambda *args, **kwargs: DummyResponse())
+    adapter.rate_limit = 0
+
+    patch = adapter.enrich_by_title("Graph Reconstruction via Example")
+
+    assert patch is not None
+    assert patch["venue"] is None
+    assert patch["venue_type"] is None
+    assert patch["publisher"] is None
+    assert patch["is_open_access"] is True
+    assert patch["openalex_id"] == "W123"
+
+
+def test_search_skips_single_openalex_enrichment_exception(capsys):
+    service = PaperSearchService(arxiv=FakeArxivOne(), openalex=FakeOpenAlexCrash())
+
+    papers = service.search("graph reconstruction")
+
+    assert len(papers) == 1
+    paper = papers[0]
+    assert paper.doi is None
+    assert paper.source_ids.openalex_id is None
+    captured = capsys.readouterr()
+    assert "OpenAlex enrichment failed" in captured.out

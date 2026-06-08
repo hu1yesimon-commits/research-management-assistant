@@ -34,14 +34,17 @@ class OpenAlexAdapter:
             return None
         return doi_url.replace("https://doi.org/", "")
 
+    def _as_dict(self, value) -> dict:
+        return value if isinstance(value, dict) else {}
+
     def _extract_venue(self, result: dict) -> str | None:
-        loc = result.get("primary_location") or {}
-        source = loc.get("source") or {}
+        loc = self._as_dict(result.get("primary_location"))
+        source = self._as_dict(loc.get("source"))
         return source.get("display_name")
 
     def _extract_venue_type(self, result: dict) -> str | None:
-        loc = result.get("primary_location") or {}
-        source = loc.get("source") or {}
+        loc = self._as_dict(result.get("primary_location"))
+        source = self._as_dict(loc.get("source"))
         type_str = source.get("type")
         if not type_str:
             return None
@@ -51,6 +54,21 @@ class OpenAlexAdapter:
             "repository": "preprint",
         }
         return type_map.get(type_str, "unknown")
+
+    def _extract_publisher(self, result: dict) -> str | None:
+        loc = self._as_dict(result.get("primary_location"))
+        source = self._as_dict(loc.get("source"))
+        return source.get("host_organization_name")
+
+    def _extract_open_access(self, result: dict) -> bool | None:
+        open_access = self._as_dict(result.get("open_access"))
+        return open_access.get("is_oa")
+
+    def _extract_openalex_id(self, result: dict) -> str | None:
+        raw_id = result.get("id")
+        if not raw_id or not isinstance(raw_id, str):
+            return None
+        return raw_id.replace("https://openalex.org/", "")
 
     def _normalize_title(self, title: str | None) -> str:
         if not title:
@@ -141,9 +159,9 @@ class OpenAlexAdapter:
             "venue": self._extract_venue(result),
             "venue_type": self._extract_venue_type(result),
             "citation_count": result.get("cited_by_count"),
-            "is_open_access": result.get("open_access", {}).get("is_oa"),
-            "publisher": result.get("primary_location", {}).get("source", {}).get("host_organization_name"),
-            "openalex_id": result.get("id", "").replace("https://openalex.org/", ""),
+            "is_open_access": self._extract_open_access(result),
+            "publisher": self._extract_publisher(result),
+            "openalex_id": self._extract_openalex_id(result),
             "match_type": match_type,
             "match_confidence": match_confidence,
             "matched_title": matched_title,

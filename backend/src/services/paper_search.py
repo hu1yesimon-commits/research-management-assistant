@@ -19,7 +19,14 @@ class PaperSearchService:
 
         # ② 逐条用 openalex 补全p
         for paper in papers:
-            patch = self.openalex.enrich_by_title(paper.title)
+            try:
+                patch = self.openalex.enrich_by_title(paper.title)
+            except Exception as exc:
+                print(
+                    f"[paper_search] OpenAlex enrichment failed for title {paper.title!r}; "
+                    f"error={type(exc).__name__}: {exc}"
+                )
+                continue
             if not patch:
                 status = getattr(self.openalex, "last_status", {"status": "unknown"})
                 print(

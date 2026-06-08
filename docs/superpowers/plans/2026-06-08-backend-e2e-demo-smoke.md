@@ -6,13 +6,13 @@
 
 Provide one place to demo and smoke-check the current backend MVP end to end without adding new business logic.
 
-This guide covers two paths:
+This guide covers three paths:
 
 - `A. Offline deterministic path`
 - `B. Real local ingestion path`
 - `C. Real LLM answer provider manual smoke`
 
-Both paths are backend-only:
+All paths are backend-only:
 
 - no frontend
 - no streaming or SSE
@@ -24,8 +24,13 @@ Both paths are backend-only:
 Current system boundaries that matter during demos:
 
 - `/search` paper discovery and knowledge retrieval are still two different chains
+- `/research/query` is the current best candidate for a frontend-facing unified entrypoint because it can return discovery and knowledge in one response
+- `/research/query` returns two sections: `discovery` and `knowledge`
+- discovery candidates are not grounded answer sources; they must not be interpreted as `knowledge.sources`
 - `/knowledge/search` and `/knowledge/answer` operate on already embedded knowledge chunks
 - `/knowledge/answer` defaults to a deterministic grounded answer; real LLM answer generation is optional manual smoke only
+- OpenAlex enrichment is best-effort; missing nested fields should degrade candidate enrichment instead of failing the whole discovery workflow
+- external API HTTP or network failures can still produce partial failures or missing enrichment data
 - retrieval uses `distance`, and smaller `distance` means a more relevant hit
 - first real BGE-M3 run may download model files
 
@@ -96,6 +101,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest \
 This path covers these endpoints:
 
 - `GET /health`
+- `POST /research/query`
 - `POST /logs`
 - `GET /logs`
 - `POST /papers/{paper_id}/embed`
@@ -112,6 +118,37 @@ Manual steps:
 
 - optional `uvicorn` startup
 - optional curl inspection of responses
+
+### Unified Research Query Smoke
+
+Use this smoke when you want one backend call that exercises both user-facing sections.
+
+Recommended requests:
+
+1. Discovery only:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/research/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"lightweight graph reconstruction","mode":"basic","include_discovery":true,"include_knowledge":false,"top_k":5}'
+```
+
+2. Discovery plus knowledge:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/research/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"lightweight graph reconstruction","mode":"basic","include_discovery":true,"include_knowledge":true,"top_k":5}'
+```
+
+Expected interpretation:
+
+- `discovery.enabled` and `knowledge.enabled` reflect the requested sections
+- `discovery.candidates` contains paper candidates only
+- `knowledge.sources` contains grounded retrieval chunks only
+- discovery must not fail with `NoneType.get` just because OpenAlex returns incomplete nested fields
+- when OpenAlex enrichment is incomplete, candidate papers should still be returned with partial metadata and raw/debug traces where available
+- if an upstream API returns HTTP failures or network errors, the response may still show section-level partial failure instead of complete success
 
 ## Path B: Real Local Ingestion Path
 
@@ -216,8 +253,8 @@ Expected interpretation:
 
 - `/knowledge/search` returns chunk hits with `distance`
 - smaller `distance` means more relevant chunks
-- `/knowledge/answer` returns deterministic grounded answer plus `sources`
-- answer is not a real LLM answer
+- `/knowledge/answer` returns grounded answer plus `sources`
+- with default `ANSWER_PROVIDER=deterministic`, the answer is not a real LLM answer
 
 ### Automation Level
 
@@ -257,6 +294,15 @@ Run this path only after all of the following are already true:
 - `POST /knowledge/search` can already retrieve non-empty chunks for the target question domain
 - local environment variables for the real LLM provider have been set
 - network access and a valid API key are available on the local machine
+
+### Supported Real Answer Providers
+
+Current real LLM answer smoke can be run with:
+
+- `ANSWER_PROVIDER=openai`
+- `ANSWER_PROVIDER=deepseek`
+
+DeepSeek is supported for real `/knowledge/answer` and `/research/query` knowledge-section manual smoke when the local environment provides valid provider configuration.
 
 If `/knowledge/search` is empty, stop here first. The no-source path is expected to return:
 
