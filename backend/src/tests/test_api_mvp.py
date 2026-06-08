@@ -169,6 +169,16 @@ def test_health_endpoint_returns_ok():
     assert response.json() == {"status": "ok"}
 
 
+def test_health_endpoint_allows_vite_cors_origin():
+    client = TestClient(app)
+
+    response = client.get("/health", headers={"Origin": "http://127.0.0.1:5173"})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
 def test_knowledge_search_returns_retrieved_results_for_embedded_chunks(tmp_path):
     test_db = tmp_path / "api-knowledge.sqlite3"
     store = get_memory_store(str(test_db))

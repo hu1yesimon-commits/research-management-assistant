@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 
 from config import config
@@ -18,6 +19,17 @@ from services.vector_store import ChromaVectorStoreService, FakeVectorStoreServi
 
 
 app = FastAPI(title="Research Management MVP")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @lru_cache(maxsize=16)
