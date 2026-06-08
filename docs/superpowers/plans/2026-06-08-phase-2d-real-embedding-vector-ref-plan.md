@@ -1,12 +1,54 @@
 # Phase 2D Real Embedding And Vector Ref Plan
 
+## Status Snapshot
+
+As of the current workspace state, this plan is now partly implemented.
+
+Implemented facts:
+
+- default runtime remains `EMBEDDING_PROVIDER=fake`
+- default runtime remains `VECTOR_BACKEND=fake`
+- `POST /papers/{paper_id}/embed` is now phase-aware
+- `uploaded -> chunked` is implemented as Phase 2C
+- `chunked -> embedded` is implemented as Phase 2D
+- `embedded` now means every target chunk has a non-empty traceable `vector_ref`
+- `vector_ref` uses the contract `chroma:<collection_name>:<chunk_uid>`
+- `chunk_uid` is derived from `paper_id`, `chunk_index`, and `chunk_hash`
+- a real optional BGE-M3 provider exists behind `EmbeddingService`
+- a real optional Chroma adapter exists behind `VectorStoreService`
+- the optional real path has passed a manual smoke:
+  `chunked -> BGE-M3 -> Chroma -> vector_ref -> embedded`
+
+Manual smoke evidence:
+
+- `EMBED_RESPONSE={"paper_id":"smoke-paper-1","status":"embedded","vector_ref_count":2}`
+- `SQLITE_VECTOR_REF_COUNT=2`
+- `SQLITE_VECTOR_REFS_OK=true`
+- `CHROMA_ID_COUNT=2`
+- `CHROMA_WRITE_OK=true`
+
+Not completed by this plan execution:
+
+- retrieval
+- RAG
+- vector search API
+- `/search` integration with Chroma retrieval
+- question answering
+- reranking over vector recall
+
+Important boundary:
+
+- this document does not claim that BGE-M3 + Chroma is the default runtime path
+- this document does not claim that `/search` already uses vector retrieval
+- this document does not claim that retrieval or RAG is complete
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Define a strict Phase 2D plan that promotes papers from `chunked` to `embedded` only after real embeddings are written and every persisted chunk has a traceable `vector_ref`.
 
 **Architecture:** Phase 2D builds on the current Phase 2C pipeline instead of replacing it. `chunked` remains the boundary for “PDF text extracted and chunks persisted”, while Phase 2D adds a separate embedding-and-vector-write phase that reads existing `knowledge_chunks`, writes vectors through a thin vector-store service, stores traceable `vector_ref` values back into SQLite, and only then updates the paper to `embedded`.
 
-**Tech Stack:** Existing FastAPI service, existing SQLite `MemoryStore`, existing `knowledge_chunks` table, future embedding provider abstraction, future vector-store abstraction, Chroma as the selected Phase 2D vector backend, no real implementation in this plan.
+**Tech Stack:** Existing FastAPI service, existing SQLite `MemoryStore`, existing `knowledge_chunks` table, embedding provider abstraction, vector-store abstraction, Chroma as the selected Phase 2D vector backend, optional BGE-M3 local provider path, but no retrieval or RAG implementation in this plan.
 
 ---
 
@@ -25,21 +67,22 @@ This plan covers:
 
 This plan explicitly does **not** include:
 
-- real embedding provider integration
-- real Chroma integration
 - real FAISS integration
 - retrieval, RAG, search, judge, or rank changes
 - `page_number` extraction as a required Phase 2D output
 - OCR, parser upgrades, or chunking-policy redesign
+
+This means the current implementation may include optional real embedding/vector backends for manual smoke validation while still excluding retrieval and `/search` integration from Phase 2D scope.
 
 ## Current Baseline
 
 What is already true in the repo today:
 
 - `PaperStatus` includes `uploaded`, `chunked`, and `embedded`.
-- `POST /papers/{paper_id}/embed` currently implements Phase 2C behavior only.
+- `POST /papers/{paper_id}/embed` is phase-aware.
 - Phase 2C starts from `uploaded`, extracts text, writes `knowledge_chunks`, and updates the paper to `chunked`.
-- `knowledge_chunks.vector_ref` exists but remains nullable and unused in current runtime behavior.
+- Phase 2D starts from `chunked`, writes embeddings and vector refs, and only then updates the paper to `embedded`.
+- `knowledge_chunks.vector_ref` is now used by the Phase 2D runtime.
 - No current path should mark a paper `embedded` as part of Phase 2C.
 
 Phase 2D should preserve all of that and add a separate strict meaning:
@@ -210,7 +253,8 @@ Confirmed default direction for this project:
 
 Important planning constraint:
 
-- this plan does **not** claim that `chromadb`, BGE-M3, a local model runtime, or any remote embedding service is already installed or implemented
+- default runtime still does **not** require `chromadb`, BGE-M3, a local model runtime, or any remote embedding service to make the baseline test suite pass
+- optional real backends may be installed and used for manual smoke without changing the default test/runtime path
 
 ### Embedding Provider
 
@@ -220,8 +264,9 @@ Recommended default provider for Phase 2D:
 
 Recommended configuration:
 
-- `EMBEDDING_PROVIDER=bge-m3`
-- `EMBEDDING_MODEL=BAAI/bge-m3`
+- default runtime: `EMBEDDING_PROVIDER=fake`
+- optional real runtime: `EMBEDDING_PROVIDER=bge-m3`
+- optional model name: `BGE_M3_MODEL_NAME=BAAI/bge-m3`
 
 Recommended service boundary:
 
@@ -233,6 +278,7 @@ Testing rule:
 - tests must use a fake embedding provider
 - tests must not call real BGE-M3, a local model runtime, OpenAI embeddings, or any remote API
 - if there is no model file, no GPU, no API key, and no external service, the default test suite must still pass
+- the real BGE-M3 path is validated only by manual smoke, not by default pytest
 
 Why BGE-M3 is the current default direction:
 
@@ -264,8 +310,8 @@ Required architectural rule:
 
 Phase 2D vector backend direction is:
 
-- use `chromadb` as the planned Chroma dependency
-- use Chroma as the Phase 2D vector backend
+- use `chromadb` as the Chroma dependency
+- use Chroma as the optional real Phase 2D vector backend
 
 Recommended service boundary:
 
@@ -274,6 +320,8 @@ Recommended service boundary:
 
 Recommended configuration:
 
+- default runtime: `VECTOR_BACKEND=fake`
+- optional real runtime: `VECTOR_BACKEND=chroma`
 - `CHROMA_PERSIST_DIR=backend/data/vector_store/chroma`
 - `CHROMA_COLLECTION_NAME=research_chunks`
 
@@ -315,6 +363,8 @@ Important documentation note for later README work:
 
 - `backend/data` is local runtime data
 - real user PDFs, SQLite databases, Chroma data, and local model caches should not be committed to git
+- Chroma uses a local persist dir when the optional real backend is enabled
+- first BGE-M3 execution may download model files into a local cache
 
 If the project later adopts a local BGE-M3 runtime:
 

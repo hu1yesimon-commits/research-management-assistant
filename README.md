@@ -2,7 +2,7 @@
 
 当前仓库已经落地的是一个后端 MVP：`FastAPI + LangGraph + SQLite`，用于论文候选检索、排序、持久化和实验日志记录。
 
-本文档只同步已经完成的事实，不把计划中的 PDF 文本抽取、向量库、前端工作台写成已完成；`Advanced-lite` 目前也只是 deterministic placeholder，不是真实 LLM / RAG research agent。
+本文档只同步已经完成的事实，不把计划中的真实 embedding provider、RAG retrieval、前端工作台写成已完成；`Advanced-lite` 目前也只是 deterministic placeholder，不是真实 LLM / RAG research agent。
 
 ## Current Scope
 
@@ -30,13 +30,17 @@
 - `POST /papers/{paper_id}/upload_pdf`
   接收 multipart PDF 文件，保存到本地 upload 目录，把论文状态更新为 `uploaded`，并记录 `pdf_path`
 - `POST /papers/{paper_id}/embed`
-  当前是 Phase 2C chunking 路由：仅允许 `uploaded` 论文执行本地 PDF 文本抽取和 chunk 持久化，成功后把状态更新为 `chunked`，返回 `paper_id`、`status`、`pdf_path`、`chunk_count`
+  当前是 phase-aware 路由：`uploaded` 论文执行本地 PDF 文本抽取和 chunk 持久化并进入 `chunked`；`chunked` 论文执行 embedding pipeline 并在所有 chunk 获得非空 `vector_ref` 后进入 `embedded`
 - `POST /logs`
   写入实验日志
 - `GET /logs`
   读取实验日志
 - `GET /memory/summary`
   返回 `candidate_count`、`known_dois`、`recent_logs`
+- `POST /knowledge/search`
+  输入 `{"query":"...","top_k":5}`，对已 `embedded` 的知识块执行 retrieval MVP，返回 chunk / paper 信息；当前只做召回，不做 RAG answer generation 或 LLM 总结
+- `POST /knowledge/answer`
+  输入 `{"question":"...","top_k":5}`，基于 retrieval 结果返回 grounded answer MVP；当前默认使用 deterministic fake answer generator，不调用真实 LLM
 
 ## Persistence
 
@@ -82,7 +86,7 @@
 - `accepted` = 可选的人工确认状态，表示用户已经认可这篇论文，但还没有上传 PDF
 - `uploaded` = PDF 已保存到本地 upload 目录，`pdf_path` 已记录，DOI 会进入强去重集合
 - `chunked` = PDF 文本抽取成功，chunks 已持久化到 `knowledge_chunks`；这仍然不是“真实 embedding 完成”
-- `embedded` = 预留给未来真实 embedding 阶段；只有当真实 embedding 完成且 `vector_ref` 可追踪时，才应该进入 `embedded`
+- `embedded` = embedding pipeline 已完成，且所有目标 chunk 都有可追踪的非空 `vector_ref`
 
 ## Knowledge-Base Stub
 
@@ -100,16 +104,23 @@
 - `upload_pdf` 会把 `papers.status` 更新为 `uploaded`
 - `upload_pdf` 会记录本地 `pdf_path`
 - 因此当前既支持 `candidate -> upload_pdf -> uploaded`，也支持 `candidate -> accept -> accepted -> upload_pdf -> uploaded`
-- `embed` 当前只做本地 PDF 文本抽取和 chunk persistence，不做真实 embedding
-- `embed` 只允许 `uploaded` 论文进入处理；失败时保持 `uploaded`
-- `embed` 成功后会删除同一 `paper_id` 的旧 chunks，写入新 chunks，再把状态更新为 `chunked`
+- `embed` 对 `uploaded` 论文执行 Phase 2C：本地 PDF 文本抽取和 chunk persistence；失败时保持 `uploaded`
+- `embed` 对 `chunked` 论文执行 embedding pipeline；只有全部目标 chunk 拿到非空 `vector_ref` 才会进入 `embedded`
+- `embed` 在 Phase 2D 重跑时会替换旧 `vector_ref`，失败时保持 `chunked`
 - uploaded paper 的 DOI 会进入 `MemoryStore.list_known_dois()`
 - chunked paper 继续保留同一个 `pdf_path`
 
+当前已完成但不是默认配置：
+
+- `EMBEDDING_PROVIDER=bge-m3` 时，可选真实 BGE-M3 provider 会参与 Phase 2D embedding
+- `VECTOR_BACKEND=chroma` 时，可选真实 Chroma adapter 会把向量写入本地 persist dir
+- 手动 smoke 已通过一条真实链路：
+  `chunked -> BGE-M3 -> Chroma -> vector_ref -> embedded`
+
 当前还没有做：
 
-- 真实 embedding
-- 真实向量库写入
+- retrieval / RAG / vector search API
+- `/search` 与 Chroma retrieval 的联动
 - PDF 内容和 paper metadata 的一致性校验
 - OCR
 - 复杂版式恢复
@@ -174,7 +185,7 @@ curl -s http://127.0.0.1:8000/memory/summary
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests -q
 ```
 
-当前在仓库内执行这条命令，应得到 `55 passed`。
+当前在仓库内执行这条命令，应得到全部测试通过；具体 case 数会随着 Phase 2D 测试增加而变化。
 
 运行当前 MVP 关键测试：
 
@@ -194,13 +205,82 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest \
 - 真实 LLM judging
 - 真实的 LLM / RAG query planning agent
 - 外网依赖下的稳定 search 集成测试
-- 向量库 / embedding 入库
+- retrieval / RAG 查询链路
 - 前端界面
 - 数据库迁移机制
+
+## Retrieval MVP
+
+当前 Phase 2E 已实现一个 retrieval MVP：
+
+- `POST /knowledge/search` 会先把 query 变成 embedding
+- 再向当前配置的 vector store 查询最近 chunks
+- 再从 SQLite 补充 `paper_id`、`chunk_index`、`text`、`vector_ref`、`title`
+
+当前返回的是可解释的检索结果，不是答案生成：
+
+- 已实现：chunk retrieval
+- 未实现：RAG answer generation
+- 未实现：LLM 总结
+- 未实现：`/search` 与 Chroma retrieval 联动
+
+## Grounded Answer MVP
+
+当前 Phase 2F 已实现一个 grounded answer MVP：
+
+- `POST /knowledge/answer` 会先调用 `/knowledge/search` 等价的 retrieval 流程
+- 再由 deterministic fake answer generator 基于 sources 生成答案
+- 返回 `question`、`answer`、`sources`、`mode`
+
+当前仍然不是生产级 RAG：
+
+- 默认不调用真实 LLM
+- 未实现多轮 chat
+- 未实现 streaming / SSE
+- 未实现 answer generation 的真实模型接入
+
+## Vector Backend
+
+当前 embedding pipeline 默认仍使用 fake provider 和 fake vector backend。
+
+embedding provider 当前也支持两种模式：
+
+- `EMBEDDING_PROVIDER=fake`
+  默认模式，基础测试和离线 contract 验证都走这个路径
+- `EMBEDDING_PROVIDER=bge-m3`
+  可选的 BGE-M3 provider，模型名由 `BGE_M3_MODEL_NAME` 控制；只有显式配置时才会加载模型
+
+向量存储 backend 当前支持两种模式：
+
+- `VECTOR_BACKEND=fake`
+  默认模式，测试和本地离线 contract 验证都走这个路径
+- `VECTOR_BACKEND=chroma`
+  可选的真实 Chroma adapter，持久化目录由 `CHROMA_PERSIST_DIR` 控制，collection 名由 `CHROMA_COLLECTION_NAME` 控制
+
+当前已完成的是可选的 BGE-M3 provider 接入和可选的 Chroma adapter 接入，不代表 retrieval、完整 RAG、问答能力或端到端语义检索已经完成。
+
+BGE-M3 运行说明：
+
+- 首次运行 `EMBEDDING_PROVIDER=bge-m3` 时，可能需要下载 `BAAI/bge-m3` 模型
+- 这一步不在默认 pytest 和 CI 中执行
+
+Chroma 运行说明：
+
+- `VECTOR_BACKEND=chroma` 时，向量会写入本地 `CHROMA_PERSIST_DIR`
+- `embedded` 的严格语义不变：只有所有目标 chunks 都有非空 `vector_ref` 时，paper 才能进入 `embedded`
+
+手动 smoke 结果：
+
+- `EMBED_RESPONSE={"paper_id":"smoke-paper-1","status":"embedded","vector_ref_count":2}`
+- `SQLITE_VECTOR_REF_COUNT=2`
+- `SQLITE_VECTOR_REFS_OK=true`
+- `CHROMA_ID_COUNT=2`
+- `CHROMA_WRITE_OK=true`
 
 另外还有几个当前限制需要注意：
 
 - `/search` 的稳定测试目前依赖 fake graph / fake search 输入，不依赖外网
+- `/search` 当前还没有与 Chroma retrieval 联动，也没有走向量检索
 - `PaperSearchService` 真实路径会访问外部源，受网络和第三方接口状态影响
 - `memory/summary` 目前是组合查询，不是单独优化过的 summary read model
 - Advanced-lite 目前只消费 experiment logs，不读取历史对话、论文摘要或知识库

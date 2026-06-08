@@ -192,3 +192,82 @@ def test_rebuild_knowledge_chunks_replaces_old_rows_for_same_paper(tmp_path):
     chunks = store.list_knowledge_chunks("paper-1")
     assert [chunk["text"] for chunk in chunks] == ["new chunk a", "new chunk b"]
     assert all(chunk["vector_ref"] is None for chunk in chunks)
+
+
+def test_update_knowledge_chunk_vector_refs_by_chunk_index(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.insert_knowledge_chunks(
+        "paper-1",
+        [
+            {"chunk_index": 0, "text": "chunk a", "chunk_hash": "hash-a", "vector_ref": None},
+            {"chunk_index": 1, "text": "chunk b", "chunk_hash": "hash-b", "vector_ref": None},
+        ],
+    )
+
+    store.update_knowledge_chunk_vector_refs(
+        "paper-1",
+        [
+            {"chunk_index": 0, "vector_ref": "chroma:research_chunks:paper-1:0:hash-a"},
+            {"chunk_index": 1, "vector_ref": "chroma:research_chunks:paper-1:1:hash-b"},
+        ],
+    )
+
+    assert [chunk["vector_ref"] for chunk in store.list_knowledge_chunks("paper-1")] == [
+        "chroma:research_chunks:paper-1:0:hash-a",
+        "chroma:research_chunks:paper-1:1:hash-b",
+    ]
+
+
+def test_clear_knowledge_chunk_vector_refs_for_paper(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.insert_knowledge_chunks(
+        "paper-1",
+        [
+            {"chunk_index": 0, "text": "chunk a", "chunk_hash": "hash-a", "vector_ref": "ref-a"},
+            {"chunk_index": 1, "text": "chunk b", "chunk_hash": "hash-b", "vector_ref": "ref-b"},
+        ],
+    )
+
+    store.clear_knowledge_chunk_vector_refs("paper-1")
+
+    assert [chunk["vector_ref"] for chunk in store.list_knowledge_chunks("paper-1")] == [None, None]
+
+
+def test_has_complete_knowledge_chunk_vector_refs_returns_true_only_when_all_chunks_are_non_empty(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.insert_knowledge_chunks(
+        "paper-1",
+        [
+            {"chunk_index": 0, "text": "chunk a", "chunk_hash": "hash-a", "vector_ref": None},
+            {"chunk_index": 1, "text": "chunk b", "chunk_hash": "hash-b", "vector_ref": None},
+        ],
+    )
+
+    assert store.has_complete_knowledge_chunk_vector_refs("paper-1") is False
+
+    store.update_knowledge_chunk_vector_refs(
+        "paper-1",
+        [
+            {"chunk_index": 0, "vector_ref": "chroma:research_chunks:paper-1:0:hash-a"},
+            {"chunk_index": 1, "vector_ref": ""},
+        ],
+    )
+
+    assert store.has_complete_knowledge_chunk_vector_refs("paper-1") is False
+
+    store.update_knowledge_chunk_vector_refs(
+        "paper-1",
+        [{"chunk_index": 1, "vector_ref": "chroma:research_chunks:paper-1:1:hash-b"}],
+    )
+
+    assert store.has_complete_knowledge_chunk_vector_refs("paper-1") is True
+
+
+def test_has_complete_knowledge_chunk_vector_refs_returns_false_for_missing_chunks(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+
+    assert store.has_complete_knowledge_chunk_vector_refs("missing-paper") is False

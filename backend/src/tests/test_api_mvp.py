@@ -3,10 +3,21 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from graph.builder import build_paper_discovery_graph
-from main import app, get_knowledge_base, get_memory_store, get_paper_discovery_graph
+from main import (
+    app,
+    get_answer_generator,
+    get_embedding_service,
+    get_knowledge_base,
+    get_memory_store,
+    get_paper_discovery_graph,
+    get_vector_store_service,
+)
+from services.embedding_service import FakeEmbeddingService
 from services.knowledge_base import KnowledgeBase
 from services.query_rewriter import QueryRewriter
 from services.schemas import JudgeResult, PaperId, PaperMetadata
+from services.vector_store import FakeVectorStoreService
+from services.answer_service import FakeGroundedAnswerGenerator
 
 
 class FakeGraph:
@@ -103,6 +114,23 @@ class FakeKnowledgeBase:
         ]
 
 
+class FailingEmbeddingService(FakeEmbeddingService):
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        raise ValueError("fake embedding failure")
+
+
+class FailingVectorStoreService(FakeVectorStoreService):
+    def upsert_chunks(self, chunks: list[dict], embeddings: list[list[float]]) -> list[str]:
+        raise ValueError("fake vector store failure")
+
+
+class EmptyVectorRefStoreService(FakeVectorStoreService):
+    def upsert_chunks(self, chunks: list[dict], embeddings: list[list[float]]) -> list[str]:
+        vector_refs = super().upsert_chunks(chunks, embeddings)
+        vector_refs[-1] = ""
+        return vector_refs
+
+
 def override_store_with_path(test_db):
     return lambda: get_memory_store(str(test_db))
 
@@ -114,6 +142,167 @@ def test_health_endpoint_returns_ok():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_knowledge_search_returns_retrieved_results_for_embedded_chunks(tmp_path):
+    test_db = tmp_path / "api-knowledge.sqlite3"
+    store = get_memory_store(str(test_db))
+    vector_store = FakeVectorStoreService()
+    paper = PaperMetadata(
+        paper_id="knowledge-paper-1",
+        source_ids=PaperId(doi="10.1000/knowledge-paper-1"),
+        title="Knowledge Paper",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi="10.1000/knowledge-paper-1",
+        source="test",
+    )
+    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.update_paper_status(paper.paper_id, "embedded", pdf_path="/tmp/knowledge-paper.pdf")
+    vector_ref = vector_store.upsert_chunks(
+        [
+            {
+                "chunk_uid": "knowledge-paper-1:0:hash-0",
+                "paper_id": paper.paper_id,
+                "chunk_index": 0,
+                "text": "graph reconstruction knowledge chunk",
+            }
+        ],
+        embeddings=[FakeEmbeddingService().embed_texts(["graph reconstruction knowledge chunk"])[0]],
+    )[0]
+    store.insert_knowledge_chunks(
+        paper.paper_id,
+        [{"chunk_index": 0, "text": "graph reconstruction knowledge chunk", "chunk_hash": "hash-0", "vector_ref": vector_ref}],
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: vector_store
+    client = TestClient(app)
+
+    response = client.post("/knowledge/search", json={"query": "graph reconstruction", "top_k": 5})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query"] == "graph reconstruction"
+    assert body["results"][0]["paper_id"] == "knowledge-paper-1"
+    assert body["results"][0]["vector_ref"] == vector_ref
+
+    app.dependency_overrides.clear()
+
+
+def test_knowledge_search_returns_empty_results_when_no_embedded_chunks_exist(tmp_path):
+    test_db = tmp_path / "api-knowledge-empty.sqlite3"
+    store = get_memory_store(str(test_db))
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    client = TestClient(app)
+
+    response = client.post("/knowledge/search", json={"query": "graph reconstruction"})
+
+    assert response.status_code == 200
+    assert response.json()["results"] == []
+
+    app.dependency_overrides.clear()
+
+
+def test_knowledge_search_rejects_blank_query(tmp_path):
+    test_db = tmp_path / "api-knowledge-blank.sqlite3"
+    app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    client = TestClient(app)
+
+    response = client.post("/knowledge/search", json={"query": "   "})
+
+    assert response.status_code == 400
+
+    app.dependency_overrides.clear()
+
+
+def test_knowledge_answer_returns_answer_and_sources_for_embedded_chunks(tmp_path):
+    test_db = tmp_path / "api-knowledge-answer.sqlite3"
+    store = get_memory_store(str(test_db))
+    vector_store = FakeVectorStoreService()
+    paper = PaperMetadata(
+        paper_id="knowledge-answer-paper-1",
+        source_ids=PaperId(doi="10.1000/knowledge-answer-paper-1"),
+        title="Knowledge Answer Paper",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi="10.1000/knowledge-answer-paper-1",
+        source="test",
+    )
+    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.update_paper_status(paper.paper_id, "embedded", pdf_path="/tmp/knowledge-answer-paper.pdf")
+    vector_ref = vector_store.upsert_chunks(
+        [
+            {
+                "chunk_uid": "knowledge-answer-paper-1:0:hash-0",
+                "paper_id": paper.paper_id,
+                "chunk_index": 0,
+                "text": "graph reconstruction grounded answer chunk",
+            }
+        ],
+        embeddings=[FakeEmbeddingService().embed_texts(["graph reconstruction grounded answer chunk"])[0]],
+    )[0]
+    store.insert_knowledge_chunks(
+        paper.paper_id,
+        [{"chunk_index": 0, "text": "graph reconstruction grounded answer chunk", "chunk_hash": "hash-0", "vector_ref": vector_ref}],
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: vector_store
+    app.dependency_overrides[get_answer_generator] = lambda: FakeGroundedAnswerGenerator()
+    client = TestClient(app)
+
+    response = client.post("/knowledge/answer", json={"question": "How do I answer graph reconstruction questions?"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["question"] == "How do I answer graph reconstruction questions?"
+    assert body["mode"] == "deterministic"
+    assert body["sources"][0]["paper_id"] == "knowledge-answer-paper-1"
+    assert body["sources"][0]["vector_ref"] == vector_ref
+
+    app.dependency_overrides.clear()
+
+
+def test_knowledge_answer_returns_fallback_when_no_results_exist(tmp_path):
+    test_db = tmp_path / "api-knowledge-answer-empty.sqlite3"
+    store = get_memory_store(str(test_db))
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    app.dependency_overrides[get_answer_generator] = lambda: FakeGroundedAnswerGenerator()
+    client = TestClient(app)
+
+    response = client.post("/knowledge/answer", json={"question": "unknown topic"})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "No relevant knowledge chunks were found."
+    assert response.json()["sources"] == []
+
+    app.dependency_overrides.clear()
+
+
+def test_knowledge_answer_rejects_blank_question(tmp_path):
+    test_db = tmp_path / "api-knowledge-answer-blank.sqlite3"
+    app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    app.dependency_overrides[get_answer_generator] = lambda: FakeGroundedAnswerGenerator()
+    client = TestClient(app)
+
+    response = client.post("/knowledge/answer", json={"question": "   "})
+
+    assert response.status_code == 400
+
+    app.dependency_overrides.clear()
 
 
 def test_logs_endpoint_saves_and_lists_logs(tmp_path):
@@ -461,6 +650,234 @@ def test_embed_rebuild_overwrites_old_chunks_for_uploaded_paper(tmp_path):
     assert [chunk["text"] for chunk in store.list_knowledge_chunks(paper.paper_id)] == [
         "new chunk pa",
         "yload for rebuild",
+    ]
+
+    app.dependency_overrides.clear()
+
+
+def test_embed_updates_chunked_paper_to_embedded_and_writes_vector_refs(tmp_path):
+    test_db = tmp_path / "api-embed-vectors.sqlite3"
+    store = get_memory_store(str(test_db))
+    paper = PaperMetadata(
+        paper_id="chunked-paper-1",
+        source_ids=PaperId(doi="10.1000/chunked-paper-1"),
+        title="Chunked Paper",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi="10.1000/chunked-paper-1",
+        source="test",
+    )
+    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
+    store.insert_knowledge_chunks(
+        paper.paper_id,
+        [
+            {"chunk_index": 0, "text": "chunk a", "chunk_hash": "hash-a", "vector_ref": None},
+            {"chunk_index": 1, "text": "chunk b", "chunk_hash": "hash-b", "vector_ref": None},
+        ],
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    client = TestClient(app)
+
+    response = client.post("/papers/chunked-paper-1/embed")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "paper_id": "chunked-paper-1",
+        "status": "embedded",
+        "vector_ref_count": 2,
+    }
+    assert store.get_paper(paper.paper_id)["status"] == "embedded"
+    assert [chunk["vector_ref"] for chunk in store.list_knowledge_chunks(paper.paper_id)] == [
+        "chroma:research_chunks:chunked-paper-1:0:hash-a",
+        "chroma:research_chunks:chunked-paper-1:1:hash-b",
+    ]
+
+    app.dependency_overrides.clear()
+
+
+def test_embed_returns_400_for_chunked_paper_with_no_chunks(tmp_path):
+    test_db = tmp_path / "api-embed-no-chunks.sqlite3"
+    store = get_memory_store(str(test_db))
+    paper = PaperMetadata(
+        paper_id="chunked-paper-no-chunks",
+        source_ids=PaperId(doi="10.1000/chunked-paper-no-chunks"),
+        title="Chunked Paper No Chunks",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi="10.1000/chunked-paper-no-chunks",
+        source="test",
+    )
+    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    client = TestClient(app)
+
+    response = client.post("/papers/chunked-paper-no-chunks/embed")
+
+    assert response.status_code == 400
+    assert store.get_paper(paper.paper_id)["status"] == "chunked"
+
+    app.dependency_overrides.clear()
+
+
+def test_embed_keeps_chunked_status_when_embedding_fails(tmp_path):
+    test_db = tmp_path / "api-embed-embedding-fail.sqlite3"
+    store = get_memory_store(str(test_db))
+    paper = PaperMetadata(
+        paper_id="chunked-paper-embedding-fail",
+        source_ids=PaperId(doi="10.1000/chunked-paper-embedding-fail"),
+        title="Chunked Paper Embedding Fail",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi="10.1000/chunked-paper-embedding-fail",
+        source="test",
+    )
+    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
+    store.insert_knowledge_chunks(
+        paper.paper_id,
+        [{"chunk_index": 0, "text": "chunk a", "chunk_hash": "hash-a", "vector_ref": None}],
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FailingEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    client = TestClient(app)
+
+    response = client.post("/papers/chunked-paper-embedding-fail/embed")
+
+    assert response.status_code == 400
+    assert store.get_paper(paper.paper_id)["status"] == "chunked"
+    assert store.list_knowledge_chunks(paper.paper_id)[0]["vector_ref"] is None
+
+    app.dependency_overrides.clear()
+
+
+def test_embed_keeps_chunked_status_when_vector_store_write_fails(tmp_path):
+    test_db = tmp_path / "api-embed-vector-store-fail.sqlite3"
+    store = get_memory_store(str(test_db))
+    paper = PaperMetadata(
+        paper_id="chunked-paper-vector-store-fail",
+        source_ids=PaperId(doi="10.1000/chunked-paper-vector-store-fail"),
+        title="Chunked Paper Vector Store Fail",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi="10.1000/chunked-paper-vector-store-fail",
+        source="test",
+    )
+    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
+    store.insert_knowledge_chunks(
+        paper.paper_id,
+        [{"chunk_index": 0, "text": "chunk a", "chunk_hash": "hash-a", "vector_ref": None}],
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FailingVectorStoreService()
+    client = TestClient(app)
+
+    response = client.post("/papers/chunked-paper-vector-store-fail/embed")
+
+    assert response.status_code == 400
+    assert store.get_paper(paper.paper_id)["status"] == "chunked"
+    assert store.list_knowledge_chunks(paper.paper_id)[0]["vector_ref"] is None
+
+    app.dependency_overrides.clear()
+
+
+def test_embed_keeps_chunked_status_when_any_vector_ref_is_empty(tmp_path):
+    test_db = tmp_path / "api-embed-empty-vector-ref.sqlite3"
+    store = get_memory_store(str(test_db))
+    paper = PaperMetadata(
+        paper_id="chunked-paper-empty-vector-ref",
+        source_ids=PaperId(doi="10.1000/chunked-paper-empty-vector-ref"),
+        title="Chunked Paper Empty Vector Ref",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi="10.1000/chunked-paper-empty-vector-ref",
+        source="test",
+    )
+    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
+    store.insert_knowledge_chunks(
+        paper.paper_id,
+        [
+            {"chunk_index": 0, "text": "chunk a", "chunk_hash": "hash-a", "vector_ref": None},
+            {"chunk_index": 1, "text": "chunk b", "chunk_hash": "hash-b", "vector_ref": None},
+        ],
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: EmptyVectorRefStoreService()
+    client = TestClient(app)
+
+    response = client.post("/papers/chunked-paper-empty-vector-ref/embed")
+
+    assert response.status_code == 400
+    assert store.get_paper(paper.paper_id)["status"] == "chunked"
+    assert store.has_complete_knowledge_chunk_vector_refs(paper.paper_id) is False
+
+    app.dependency_overrides.clear()
+
+
+def test_embed_replaces_stale_vector_refs_for_chunked_paper(tmp_path):
+    test_db = tmp_path / "api-embed-replace-vector-refs.sqlite3"
+    store = get_memory_store(str(test_db))
+    vector_store = FakeVectorStoreService()
+    paper = PaperMetadata(
+        paper_id="chunked-paper-rebuild",
+        source_ids=PaperId(doi="10.1000/chunked-paper-rebuild"),
+        title="Chunked Paper Rebuild",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi="10.1000/chunked-paper-rebuild",
+        source="test",
+    )
+    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
+    store.insert_knowledge_chunks(
+        paper.paper_id,
+        [
+            {
+                "chunk_index": 0,
+                "text": "chunk a",
+                "chunk_hash": "hash-a",
+                "vector_ref": "chroma:research_chunks:stale-uid-a",
+            },
+            {
+                "chunk_index": 1,
+                "text": "chunk b",
+                "chunk_hash": "hash-b",
+                "vector_ref": "chroma:research_chunks:stale-uid-b",
+            },
+        ],
+    )
+    vector_store.records["chroma:research_chunks:stale-uid-a"] = {"chunk": {}, "embedding": []}
+    vector_store.records["chroma:research_chunks:stale-uid-b"] = {"chunk": {}, "embedding": []}
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: vector_store
+    client = TestClient(app)
+
+    response = client.post("/papers/chunked-paper-rebuild/embed")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "embedded"
+    assert "chroma:research_chunks:stale-uid-a" not in vector_store.records
+    assert "chroma:research_chunks:stale-uid-b" not in vector_store.records
+    assert [chunk["vector_ref"] for chunk in store.list_knowledge_chunks(paper.paper_id)] == [
+        "chroma:research_chunks:chunked-paper-rebuild:0:hash-a",
+        "chroma:research_chunks:chunked-paper-rebuild:1:hash-b",
     ]
 
     app.dependency_overrides.clear()

@@ -55,6 +55,47 @@ class LogRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class KnowledgeSearchRequest(BaseModel):
+    query: str
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class KnowledgeSearchResult(BaseModel):
+    paper_id: str
+    chunk_index: int
+    text: str
+    vector_ref: str
+    distance: float
+    title: str | None = None
+
+
+class KnowledgeSearchResponse(BaseModel):
+    query: str
+    top_k: int
+    results: list[KnowledgeSearchResult] = Field(default_factory=list)
+
+
+class KnowledgeAnswerRequest(BaseModel):
+    question: str
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class KnowledgeAnswerSource(BaseModel):
+    paper_id: str
+    title: str | None = None
+    chunk_index: int
+    distance: float
+    text: str
+    vector_ref: str
+
+
+class KnowledgeAnswerResponse(BaseModel):
+    question: str
+    answer: str
+    sources: list[KnowledgeAnswerSource] = Field(default_factory=list)
+    mode: str
+
+
 class PaperStatus(str, Enum):
     candidate = "candidate"
     accepted = "accepted"

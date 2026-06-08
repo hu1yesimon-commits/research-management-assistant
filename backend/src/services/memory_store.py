@@ -403,6 +403,91 @@ class MemoryStore:
             for row in rows
         ]
 
+    def get_knowledge_chunk(self, paper_id: str, chunk_index: int) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id,
+                    paper_id,
+                    chunk_index,
+                    text,
+                    chunk_hash,
+                    vector_ref,
+                    created_at
+                FROM knowledge_chunks
+                WHERE paper_id = ? AND chunk_index = ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (paper_id, chunk_index),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "id": row["id"],
+            "paper_id": row["paper_id"],
+            "chunk_index": row["chunk_index"],
+            "text": row["text"],
+            "chunk_hash": row["chunk_hash"],
+            "vector_ref": row["vector_ref"],
+            "created_at": row["created_at"],
+        }
+
+    def update_knowledge_chunk_vector_refs(self, paper_id: str, updates: list[dict]) -> None:
+        rows = [
+            (update["vector_ref"], paper_id, update["chunk_index"])
+            for update in updates
+        ]
+        if not rows:
+            return
+
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                UPDATE knowledge_chunks
+                SET vector_ref = ?
+                WHERE paper_id = ? AND chunk_index = ?
+                """,
+                rows,
+            )
+
+    def clear_knowledge_chunk_vector_refs(self, paper_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE knowledge_chunks
+                SET vector_ref = NULL
+                WHERE paper_id = ?
+                """,
+                (paper_id,),
+            )
+
+    def has_complete_knowledge_chunk_vector_refs(self, paper_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS chunk_count,
+                    SUM(
+                        CASE
+                            WHEN vector_ref IS NOT NULL AND TRIM(vector_ref) != '' THEN 1
+                            ELSE 0
+                        END
+                    ) AS complete_count
+                FROM knowledge_chunks
+                WHERE paper_id = ?
+                """,
+                (paper_id,),
+            ).fetchone()
+
+        if row is None or row["chunk_count"] == 0:
+            return False
+
+        return row["chunk_count"] == row["complete_count"]
+
     def delete_knowledge_chunks_by_paper(self, paper_id: str) -> None:
         with self._connect() as connection:
             connection.execute(

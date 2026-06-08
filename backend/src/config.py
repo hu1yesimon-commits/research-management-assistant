@@ -3,6 +3,8 @@ load_dotenv()
 
 import os
 from dataclasses import dataclass
+
+
 @dataclass
 class Config:
     # arXiv
@@ -31,6 +33,14 @@ class Config:
     database_path: str = "backend/data/research_memory.sqlite3"
     pdf_upload_dir: str = "backend/data/uploads"
     vector_store_dir: str = "backend/data/vector_store"
+    vector_backend: str = "fake"
+    chroma_persist_dir: str = "backend/data/vector_store/chroma"
+    chroma_collection_name: str = "research_chunks"
+    embedding_provider: str = "fake"
+    bge_m3_model_name: str = "BAAI/bge-m3"
+    answer_provider: str = "deterministic"
+    answer_model: str = "gpt-4.1-mini"
+    answer_temperature: float = 0.0
 
 config = Config(
     arxiv_max_results=int(os.getenv("ARXIV_MAX_RESULTS", "10")),
@@ -49,5 +59,13 @@ config = Config(
     database_path=os.getenv("DATABASE_PATH", "backend/data/research_memory.sqlite3"),
     pdf_upload_dir=os.getenv("PDF_UPLOAD_DIR", "backend/data/uploads"),
     vector_store_dir=os.getenv("VECTOR_STORE_DIR", "backend/data/vector_store"),
+    vector_backend=os.getenv("VECTOR_BACKEND", "fake"),
+    chroma_persist_dir=os.getenv("CHROMA_PERSIST_DIR", "backend/data/vector_store/chroma"),
+    chroma_collection_name=os.getenv("CHROMA_COLLECTION_NAME", "research_chunks"),
+    embedding_provider=os.getenv("EMBEDDING_PROVIDER", "fake"),
+    bge_m3_model_name=os.getenv("BGE_M3_MODEL_NAME", "BAAI/bge-m3"),
+    answer_provider=os.getenv("ANSWER_PROVIDER", "deterministic"),
+    answer_model=os.getenv("ANSWER_MODEL", "gpt-4.1-mini"),
+    answer_temperature=float(os.getenv("ANSWER_TEMPERATURE", "0")),
 
 )

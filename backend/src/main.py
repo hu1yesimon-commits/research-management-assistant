@@ -1,12 +1,17 @@
-from pathlib import Path
-
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from langchain_openai import ChatOpenAI
 
 from config import config
 from graph.builder import build_paper_discovery_graph
+from services.answer_service import AnswerGenerator, FakeGroundedAnswerGenerator, LLMAnswerGenerator, PromptBuilder
+from services.embedding_pipeline import EmbeddingPipelineError, EmbeddingPipelineService
+from services.embedding_service import BgeM3EmbeddingService, EmbeddingService, FakeEmbeddingService
 from services.knowledge_base import KnowledgeBase
 from services.memory_store import MemoryStore
-from services.schemas import LogRequest, PaperStatus, SearchRequest
+from services.qa_service import KnowledgeQAService, QAServiceError
+from services.retrieval_service import KnowledgeRetrievalService, RetrievalServiceError
+from services.schemas import KnowledgeAnswerRequest, KnowledgeSearchRequest, LogRequest, PaperStatus, SearchRequest
+from services.vector_store import ChromaVectorStoreService, FakeVectorStoreService, VectorStoreService
 
 
 app = FastAPI(title="Research Management MVP")
@@ -24,6 +29,78 @@ def get_paper_discovery_graph(store: MemoryStore = Depends(get_memory_store)):
 
 def get_knowledge_base(upload_dir: str | None = None) -> KnowledgeBase:
     return KnowledgeBase(upload_dir or config.pdf_upload_dir)
+
+
+def get_embedding_service() -> EmbeddingService:
+    if config.embedding_provider == "bge-m3":
+        return BgeM3EmbeddingService(model_name=config.bge_m3_model_name)
+    return FakeEmbeddingService()
+
+
+def get_vector_store_service() -> VectorStoreService:
+    if config.vector_backend == "chroma":
+        return ChromaVectorStoreService(
+            persist_dir=config.chroma_persist_dir,
+            collection_name=config.chroma_collection_name,
+        )
+    return FakeVectorStoreService(collection_name=config.chroma_collection_name)
+
+
+def get_answer_generator() -> AnswerGenerator:
+    if config.answer_provider == "deterministic":
+        return FakeGroundedAnswerGenerator()
+    if config.answer_provider == "openai":
+        return LLMAnswerGenerator(
+            llm_client=ChatOpenAI(
+                model=config.answer_model,
+                temperature=config.answer_temperature,
+            ),
+            prompt_builder=PromptBuilder(),
+        )
+    raise ValueError(f"unsupported ANSWER_PROVIDER: {config.answer_provider}")
+
+
+def get_answer_mode() -> str:
+    if config.answer_provider == "deterministic":
+        return "deterministic"
+    return "llm"
+
+
+def get_embedding_pipeline_service(
+    store: MemoryStore = Depends(get_memory_store),
+    knowledge_base: KnowledgeBase = Depends(get_knowledge_base),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    vector_store_service: VectorStoreService = Depends(get_vector_store_service),
+) -> EmbeddingPipelineService:
+    return EmbeddingPipelineService(
+        store=store,
+        knowledge_base=knowledge_base,
+        embedding_service=embedding_service,
+        vector_store_service=vector_store_service,
+    )
+
+
+def get_knowledge_retrieval_service(
+    store: MemoryStore = Depends(get_memory_store),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    vector_store_service: VectorStoreService = Depends(get_vector_store_service),
+) -> KnowledgeRetrievalService:
+    return KnowledgeRetrievalService(
+        store=store,
+        embedding_service=embedding_service,
+        vector_store_service=vector_store_service,
+    )
+
+
+def get_knowledge_qa_service(
+    retrieval_service: KnowledgeRetrievalService = Depends(get_knowledge_retrieval_service),
+    answer_generator: AnswerGenerator = Depends(get_answer_generator),
+) -> KnowledgeQAService:
+    return KnowledgeQAService(
+        retrieval_service=retrieval_service,
+        answer_generator=answer_generator,
+        mode=get_answer_mode(),
+    )
 
 
 @app.get("/health")
@@ -92,37 +169,34 @@ async def upload_pdf(
 @app.post("/papers/{paper_id}/embed")
 def embed_paper(
     paper_id: str,
-    store: MemoryStore = Depends(get_memory_store),
-    knowledge_base: KnowledgeBase = Depends(get_knowledge_base),
+    pipeline: EmbeddingPipelineService = Depends(get_embedding_pipeline_service),
 ):
-    paper = store.get_paper(paper_id)
-    if paper is None:
-        raise HTTPException(status_code=404, detail=f"paper not found: {paper_id}")
-    if paper["status"] != PaperStatus.uploaded.value:
-        raise HTTPException(status_code=400, detail=f"paper is not uploaded: {paper_id}")
-    if not paper["pdf_path"]:
-        raise HTTPException(status_code=400, detail=f"paper pdf_path missing: {paper_id}")
-    if not Path(paper["pdf_path"]).exists():
-        raise HTTPException(status_code=400, detail=f"paper pdf_path does not exist: {paper['pdf_path']}")
-
     try:
-        text = knowledge_base.extract_text(paper["pdf_path"])
-        chunks = knowledge_base.chunk_text(text)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return pipeline.run(paper_id)
+    except EmbeddingPipelineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-    if not chunks:
-        raise HTTPException(status_code=400, detail=f"no chunks produced for paper: {paper_id}")
 
-    store.delete_knowledge_chunks_by_paper(paper_id)
-    store.insert_knowledge_chunks(paper_id, chunks)
-    store.update_paper_status(paper_id, PaperStatus.chunked.value)
-    return {
-        "paper_id": paper_id,
-        "status": PaperStatus.chunked.value,
-        "pdf_path": paper["pdf_path"],
-        "chunk_count": len(chunks),
-    }
+@app.post("/knowledge/search")
+def knowledge_search(
+    request: KnowledgeSearchRequest,
+    retrieval_service: KnowledgeRetrievalService = Depends(get_knowledge_retrieval_service),
+):
+    try:
+        return retrieval_service.search(request.query, top_k=request.top_k)
+    except RetrievalServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@app.post("/knowledge/answer")
+def knowledge_answer(
+    request: KnowledgeAnswerRequest,
+    qa_service: KnowledgeQAService = Depends(get_knowledge_qa_service),
+):
+    try:
+        return qa_service.answer(request.question, top_k=request.top_k)
+    except QAServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @app.post("/logs")
