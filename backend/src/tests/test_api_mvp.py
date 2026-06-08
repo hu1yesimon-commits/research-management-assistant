@@ -8,16 +8,19 @@ from main import (
     get_answer_generator,
     get_embedding_service,
     get_knowledge_base,
+    get_knowledge_qa_service,
     get_memory_store,
     get_paper_discovery_graph,
+    get_research_workflow_service,
     get_vector_store_service,
 )
 from services.embedding_service import FakeEmbeddingService
 from services.knowledge_base import KnowledgeBase
 from services.query_rewriter import QueryRewriter
-from services.schemas import JudgeResult, PaperId, PaperMetadata
+from services.schemas import JudgeResult, KnowledgeAnswerResponse, KnowledgeAnswerSource, PaperId, PaperMetadata
 from services.vector_store import FakeVectorStoreService
 from services.answer_service import FakeGroundedAnswerGenerator
+from services.research_workflow import ResearchWorkflowService
 
 
 class FakeGraph:
@@ -129,6 +132,28 @@ class EmptyVectorRefStoreService(FakeVectorStoreService):
         vector_refs = super().upsert_chunks(chunks, embeddings)
         vector_refs[-1] = ""
         return vector_refs
+
+
+class FakeKnowledgeQAService:
+    def __init__(self, response: KnowledgeAnswerResponse | None = None):
+        self.response = response or KnowledgeAnswerResponse(
+            question="lightweight graph reconstruction",
+            answer="Knowledge answer",
+            sources=[
+                KnowledgeAnswerSource(
+                    paper_id="knowledge-paper-1",
+                    title="Knowledge Paper",
+                    chunk_index=0,
+                    distance=0.1,
+                    text="embedded chunk",
+                    vector_ref="chroma:research_chunks:knowledge-paper-1:0:hash-0",
+                )
+            ],
+            mode="deterministic",
+        )
+
+    def answer(self, question: str, top_k: int = 5) -> KnowledgeAnswerResponse:
+        return self.response.model_copy(update={"question": question})
 
 
 def override_store_with_path(test_db):
@@ -299,6 +324,78 @@ def test_knowledge_answer_rejects_blank_question(tmp_path):
     client = TestClient(app)
 
     response = client.post("/knowledge/answer", json={"question": "   "})
+
+    assert response.status_code == 400
+
+    app.dependency_overrides.clear()
+
+
+def test_research_query_returns_discovery_and_knowledge_sections(tmp_path):
+    test_db = tmp_path / "api-research-query.sqlite3"
+    store = get_memory_store(str(test_db))
+    workflow = ResearchWorkflowService(
+        discovery_graph=FakeGraph(store),
+        knowledge_qa_service=FakeKnowledgeQAService(),
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_research_workflow_service] = lambda: workflow
+    client = TestClient(app)
+
+    response = client.post("/research/query", json={"query": "lightweight graph reconstruction", "top_k": 5})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query"] == "lightweight graph reconstruction"
+    assert body["mode"] == "basic"
+    assert body["discovery"]["enabled"] is True
+    assert body["discovery"]["candidates"][0]["paper"]["paper_id"] == "api-paper-1"
+    assert body["knowledge"]["enabled"] is True
+    assert body["knowledge"]["answer"] == "Knowledge answer"
+    assert body["knowledge"]["sources"][0]["paper_id"] == "knowledge-paper-1"
+
+    app.dependency_overrides.clear()
+
+
+def test_research_query_rejects_blank_query(tmp_path):
+    test_db = tmp_path / "api-research-query-blank.sqlite3"
+    store = get_memory_store(str(test_db))
+    workflow = ResearchWorkflowService(
+        discovery_graph=FakeGraph(store),
+        knowledge_qa_service=FakeKnowledgeQAService(),
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_research_workflow_service] = lambda: workflow
+    client = TestClient(app)
+
+    response = client.post("/research/query", json={"query": "   "})
+
+    assert response.status_code == 400
+
+    app.dependency_overrides.clear()
+
+
+def test_research_query_rejects_when_both_sections_disabled(tmp_path):
+    test_db = tmp_path / "api-research-query-disabled.sqlite3"
+    store = get_memory_store(str(test_db))
+    workflow = ResearchWorkflowService(
+        discovery_graph=FakeGraph(store),
+        knowledge_qa_service=FakeKnowledgeQAService(),
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_research_workflow_service] = lambda: workflow
+    client = TestClient(app)
+
+    response = client.post(
+        "/research/query",
+        json={
+            "query": "lightweight graph reconstruction",
+            "include_discovery": False,
+            "include_knowledge": False,
+        },
+    )
 
     assert response.status_code == 400
 

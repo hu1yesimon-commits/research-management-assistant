@@ -96,6 +96,35 @@ class KnowledgeAnswerResponse(BaseModel):
     mode: str
 
 
+class ResearchQueryRequest(BaseModel):
+    query: str
+    mode: Literal["basic", "advanced"] = "basic"
+    include_discovery: bool = True
+    include_knowledge: bool = True
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class ResearchDiscoverySection(BaseModel):
+    enabled: bool
+    candidates: list[dict] = Field(default_factory=list)
+    error: str | None = None
+
+
+class ResearchKnowledgeSection(BaseModel):
+    enabled: bool
+    answer: str | None = None
+    sources: list[KnowledgeAnswerSource] = Field(default_factory=list)
+    error: str | None = None
+    mode: str | None = None
+
+
+class ResearchQueryResponse(BaseModel):
+    query: str
+    mode: str
+    discovery: ResearchDiscoverySection
+    knowledge: ResearchKnowledgeSection
+
+
 class PaperStatus(str, Enum):
     candidate = "candidate"
     accepted = "accepted"

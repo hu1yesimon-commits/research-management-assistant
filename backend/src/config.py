@@ -41,6 +41,9 @@ class Config:
     answer_provider: str = "deterministic"
     answer_model: str = "gpt-4.1-mini"
     answer_temperature: float = 0.0
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = ""
+    deepseek_model: str = "deepseek-chat"
 
 config = Config(
     arxiv_max_results=int(os.getenv("ARXIV_MAX_RESULTS", "10")),
@@ -67,5 +70,8 @@ config = Config(
     answer_provider=os.getenv("ANSWER_PROVIDER", "deterministic"),
     answer_model=os.getenv("ANSWER_MODEL", "gpt-4.1-mini"),
     answer_temperature=float(os.getenv("ANSWER_TEMPERATURE", "0")),
+    deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+    deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", ""),
+    deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
 
 )

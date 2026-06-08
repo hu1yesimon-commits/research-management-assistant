@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from langchain_openai import ChatOpenAI
 
@@ -9,12 +11,45 @@ from services.embedding_service import BgeM3EmbeddingService, EmbeddingService, 
 from services.knowledge_base import KnowledgeBase
 from services.memory_store import MemoryStore
 from services.qa_service import KnowledgeQAService, QAServiceError
+from services.research_workflow import ResearchWorkflowError, ResearchWorkflowService
 from services.retrieval_service import KnowledgeRetrievalService, RetrievalServiceError
-from services.schemas import KnowledgeAnswerRequest, KnowledgeSearchRequest, LogRequest, PaperStatus, SearchRequest
+from services.schemas import KnowledgeAnswerRequest, KnowledgeSearchRequest, LogRequest, PaperStatus, ResearchQueryRequest, SearchRequest
 from services.vector_store import ChromaVectorStoreService, FakeVectorStoreService, VectorStoreService
 
 
 app = FastAPI(title="Research Management MVP")
+
+
+@lru_cache(maxsize=16)
+def _get_cached_chroma_vector_store_service(
+    vector_backend: str,
+    chroma_persist_dir: str,
+    chroma_collection_name: str,
+) -> VectorStoreService:
+    if vector_backend != "chroma":
+        raise ValueError(f"unsupported cached vector backend: {vector_backend}")
+    return ChromaVectorStoreService(
+        persist_dir=chroma_persist_dir,
+        collection_name=chroma_collection_name,
+    )
+
+
+def reset_vector_store_service_cache() -> None:
+    _get_cached_chroma_vector_store_service.cache_clear()
+
+
+@lru_cache(maxsize=8)
+def _get_cached_embedding_service(
+    embedding_provider: str,
+    bge_m3_model_name: str,
+) -> EmbeddingService:
+    if embedding_provider != "bge-m3":
+        raise ValueError(f"unsupported cached embedding provider: {embedding_provider}")
+    return BgeM3EmbeddingService(model_name=bge_m3_model_name)
+
+
+def reset_embedding_service_cache() -> None:
+    _get_cached_embedding_service.cache_clear()
 
 
 def get_memory_store(database_path: str | None = None) -> MemoryStore:
@@ -33,15 +68,19 @@ def get_knowledge_base(upload_dir: str | None = None) -> KnowledgeBase:
 
 def get_embedding_service() -> EmbeddingService:
     if config.embedding_provider == "bge-m3":
-        return BgeM3EmbeddingService(model_name=config.bge_m3_model_name)
+        return _get_cached_embedding_service(
+            embedding_provider=config.embedding_provider,
+            bge_m3_model_name=config.bge_m3_model_name,
+        )
     return FakeEmbeddingService()
 
 
 def get_vector_store_service() -> VectorStoreService:
     if config.vector_backend == "chroma":
-        return ChromaVectorStoreService(
-            persist_dir=config.chroma_persist_dir,
-            collection_name=config.chroma_collection_name,
+        return _get_cached_chroma_vector_store_service(
+            vector_backend=config.vector_backend,
+            chroma_persist_dir=config.chroma_persist_dir,
+            chroma_collection_name=config.chroma_collection_name,
         )
     return FakeVectorStoreService(collection_name=config.chroma_collection_name)
 
@@ -54,6 +93,16 @@ def get_answer_generator() -> AnswerGenerator:
             llm_client=ChatOpenAI(
                 model=config.answer_model,
                 temperature=config.answer_temperature,
+            ),
+            prompt_builder=PromptBuilder(),
+        )
+    if config.answer_provider == "deepseek":
+        return LLMAnswerGenerator(
+            llm_client=ChatOpenAI(
+                model=config.deepseek_model,
+                temperature=config.answer_temperature,
+                api_key=config.deepseek_api_key,
+                base_url=config.deepseek_base_url,
             ),
             prompt_builder=PromptBuilder(),
         )
@@ -100,6 +149,16 @@ def get_knowledge_qa_service(
         retrieval_service=retrieval_service,
         answer_generator=answer_generator,
         mode=get_answer_mode(),
+    )
+
+
+def get_research_workflow_service(
+    discovery_graph=Depends(get_paper_discovery_graph),
+    qa_service: KnowledgeQAService = Depends(get_knowledge_qa_service),
+) -> ResearchWorkflowService:
+    return ResearchWorkflowService(
+        discovery_graph=discovery_graph,
+        knowledge_qa_service=qa_service,
     )
 
 
@@ -196,6 +255,23 @@ def knowledge_answer(
     try:
         return qa_service.answer(request.question, top_k=request.top_k)
     except QAServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@app.post("/research/query")
+def research_query(
+    request: ResearchQueryRequest,
+    workflow_service: ResearchWorkflowService = Depends(get_research_workflow_service),
+):
+    try:
+        return workflow_service.query(
+            query=request.query,
+            mode=request.mode,
+            include_discovery=request.include_discovery,
+            include_knowledge=request.include_knowledge,
+            top_k=request.top_k,
+        )
+    except ResearchWorkflowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
