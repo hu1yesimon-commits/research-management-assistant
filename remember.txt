@@ -1,0 +1,146 @@
+职责
+  1. DeDuplicator 输出去重后的 PaperMetadata
+  2. LLMJudge 接收 PaperMetadata + query
+  3. LLMJudge 让模型根据 title / abstract / venue / venue_type / published_date 判断 llm_relevance_score 和 quality_score
+  4. embedding_relevance_score 最好由单独的 embedding 服务提前算好，再传给 LLMJudge
+  5. novelty_score 用规则函数算好，不让 LLM 主观生成
+  6. LLMJudge 调用 calculate_final_score()
+  7. 最后用 sort_by_final_score() 降序排列结果
+
+
+Langgraph 化
+  阶段 1：普通 Python 服务
+
+  PaperSearchService + DeDuplicator + LLMJudge
+
+  阶段 2：简单 LangGraph 编排
+
+  search → dedup → judge → register
+
+  阶段 3：加人工确认
+
+  judge 后 uncertain 的论文暂停，让你手动确认
+
+  阶段 4：加持久化
+
+  用 checkpointer 保存流程状态，避免中途失败全部重跑
+
+
+
+标准 metadata schema 建议
+{
+  "paper_id": "string",
+  "source_ids": {
+    "arxiv_id": "string|null",
+    "semantic_scholar_id": "string|null",
+    "openalex_id": "string|null",
+    "doi": "string|null"
+  },
+  "title": "string",
+  "authors": ["string"],
+  "abstract": "string|null",
+  "published_date": "YYYY-MM-DD|null",
+  "updated_date": "YYYY-MM-DD|null",
+  "venue": "string|null",
+  "venue_type": "journal|conference|preprint|repository|unknown",
+  "publisher": "string|null",
+  "doi": "string|null",
+  "url": "string|null",
+  "pdf_url": "string|null",
+  "source": "arxiv|semantic_scholar|openalex|crossref|europe_pmc",
+  "citation_count": 0,
+  "is_open_access": true,
+  "fields_of_study": ["string"],
+  "keywords": ["string"],
+  "github_url": "string|null",
+  "raw": {}
+}
+后面 LLM Judge 不要直接吃 raw API response，而是只吃 normalized schema。
+
+
+多数据源：
+    V1.0 必接
+    Arxiv
+    Semantic Scholar
+    OpenAlex
+
+    用户选择 mode
+    ↓
+    生成 query
+    ↓
+    Arxiv 搜新论文
+    ↓
+    Semantic Scholar 搜相关论文 + 相似论文
+    ↓
+    OpenAlex 补 metadata
+    ↓
+    统一成 normalized_papers
+
+
+ v1.1
+    Crossref
+    GitHub
+    Papers with Code   
+    
+    Crossref：补 DOI / journal / publisher
+    GitHub：找论文代码仓库
+    Papers with Code：找 benchmark / task / implementation
+
+quality_score 可以先简单做
+    relevance_score
+    quality_score
+    final_score = 0.65 * relevance_score + 0.25 * quality_score + 0.10 * freshness_score
+    
+    relevance_score：LLM 根据 query / research profile / abstract 判断
+
+    quality_score：citation_count、venue 是否存在、是否有 DOI、是否有 PDF、是否来自可信源
+
+    freshness_score：发布日期越近越高
+
+可以用 vibecoding 辅助的部分
+
+这些适合让 AI 帮你生成初版：
+    1. Arxiv API adapter
+
+    2. Semantic Scholar adapter
+
+    3. OpenAlex adapter
+
+    4. Crossref metadata 补全函数
+
+    5. FastAPI 路由
+
+    6. Pydantic model
+
+    7. 日志模块
+
+    8. 简单前端页面
+
+    9. Markdown 报告模板
+
+    10. 单元测试样例
+
+
+文件目录：
+backend/
+  src/
+    graph/
+      state.py
+      nodes.py
+      builder.py
+
+    services/
+      paper_search/
+        __init__.py
+        service.py
+        schemas.py
+        normalizer.py
+        deduplicator.py
+        adapters/
+          base.py
+          arxiv_adapter.py
+          semantic_scholar_adapter.py
+          openalex_adapter.py
+
+    config.py
+    main.py

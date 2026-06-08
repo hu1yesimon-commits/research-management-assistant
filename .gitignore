@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.venv/
+
+# Local environment and OS files
+.env
+.DS_Store
+
+# Runtime data
+backend/data/
+*.sqlite3
+*.db
+
+# Test/cache artifacts
+.pytest_cache/
+__pycache__/
+
+# Local worktree directories
+.worktrees/
+worktrees/

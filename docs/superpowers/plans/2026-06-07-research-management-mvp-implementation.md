@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the existing Python service layout and turn it into a working FastAPI + LangGraph backend. Start with a REST-only synchronous flow, persist state in SQLite, store uploaded PDFs locally, and postpone SSE until after the MVP closes the loop.
 
-**Tech Stack:** Python 3.12, FastAPI, LangGraph, Pydantic, SQLite, pytest, arXiv/OpenAlex adapters, local vector store with Chroma or FAISS, Vue 3 + Vite.
+**Tech Stack:** Python 3.12, FastAPI, LangGraph, Pydantic, SQLite, pytest, arXiv/OpenAlex adapters, local vector store with Chroma, Vue 3 + Vite.
 
 ---
 
@@ -377,7 +377,7 @@ Implementation rules:
 - Create tables in `initialize()`.
 - Store list/dict fields as JSON text.
 - Normalize DOI to lowercase and strip `https://doi.org/`.
-- `list_known_dois()` returns DOI values only for papers with status `uploaded` or `embedded`.
+- `list_known_dois()` returns DOI values only for papers with status `uploaded`, `chunked`, or `embedded`.
 - Use `INSERT OR REPLACE` for paper metadata keyed by `paper_id`.
 
 - [ ] **Step 5: Run memory-store test**
@@ -1211,12 +1211,15 @@ async def upload_pdf(
     file: UploadFile = File(...),
     store: MemoryStore = Depends(get_memory_store),
 ):
-    kb = KnowledgeBase(config.pdf_upload_dir, config.vector_store_dir)
+    kb = KnowledgeBase(config.pdf_upload_dir)
     content = await file.read()
     pdf_path = kb.save_pdf(paper_id, file.filename or f"{paper_id}.pdf", content)
-    chunk_ids = kb.ingest_pdf(paper_id, pdf_path)
-    store.update_paper_status(paper_id, "embedded", pdf_path=pdf_path)
-    return {"paper_id": paper_id, "pdf_path": pdf_path, "chunk_ids": chunk_ids}
+    text = kb.extract_text(pdf_path)
+    chunks = kb.chunk_text(text)
+    store.delete_knowledge_chunks_by_paper(paper_id)
+    store.insert_knowledge_chunks(paper_id, chunks)
+    store.update_paper_status(paper_id, "chunked", pdf_path=pdf_path)
+    return {"paper_id": paper_id, "pdf_path": pdf_path, "status": "chunked", "chunk_count": len(chunks)}
 ```
 
 - [ ] **Step 7: Run upload and knowledge-base tests**
@@ -1514,7 +1517,7 @@ git commit -m "docs: add mvp run instructions"
 - Use `PYTHONPATH=backend/src` for backend tests until the package layout is formalized.
 - Keep `LLMJudge` as mock scoring in the MVP. Replace with real LLM calls only after API, graph, and persistence are stable.
 - Keep `QueryRewriter` deterministic in the MVP. It provides the Advanced-lite interface without introducing LLM reliability issues too early.
-- Do not register DOI values during candidate discovery. Only `uploaded` and `embedded` papers participate in hard DOI deduplication.
+- Do not register DOI values during candidate discovery. Only `uploaded`, `chunked`, and `embedded` papers participate in hard DOI deduplication.
 - Treat network-backed arXiv/OpenAlex tests as smoke tests, not unit tests. Use fake adapters for deterministic automated tests.
 - Avoid SSE until the REST flow is stable end to end.
 
@@ -1525,7 +1528,7 @@ Spec coverage:
 - Basic search flow is covered by Tasks 1, 3, 4, and 5.
 - Advanced-lite query rewriting is covered by Task 6.
 - SQLite persistence is covered by Task 2.
-- DOI dedup based on uploaded/embedded papers is covered by Task 3.
+- DOI dedup based on uploaded/chunked/embedded papers is covered by Task 3.
 - PDF upload and local chunk storage are covered by Task 7.
 - Vue workbench is covered by Task 8.
 - MVP verification and README instructions are covered by Task 9.
