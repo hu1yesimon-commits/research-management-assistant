@@ -46,6 +46,8 @@
       @refresh="loadCandidates"
       @select-file="handleFileSelection"
     />
+
+    <IdeaAssistantPanel />
   </main>
 </template>
 
@@ -63,6 +65,7 @@ import {
 } from "../api";
 import CandidateLifecyclePanel from "./CandidateLifecyclePanel.vue";
 import DiscoveryPanel from "./DiscoveryPanel.vue";
+import IdeaAssistantPanel from "./IdeaAssistantPanel.vue";
 import KnowledgePanel from "./KnowledgePanel.vue";
 import QueryForm from "./QueryForm.vue";
 

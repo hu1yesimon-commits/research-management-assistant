@@ -36,6 +36,30 @@ export function researchQuery(payload) {
   });
 }
 
+export function createExperimentLog(payload) {
+  return request("/experiments/logs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listExperimentLogs() {
+  return request("/experiments/logs");
+}
+
+export function recommendIdeas(payload) {
+  return request("/ideas/recommend", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getCandidates() {
   return request("/papers/candidates");
 }
