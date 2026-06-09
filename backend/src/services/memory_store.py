@@ -68,6 +68,19 @@ class MemoryStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS experiment_log_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    dataset TEXT NOT NULL,
+                    metric_problem TEXT NOT NULL,
+                    tried_methods_json TEXT NOT NULL,
+                    observation TEXT NOT NULL,
+                    goal TEXT NOT NULL,
+                    tags_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS knowledge_chunks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     paper_id TEXT NOT NULL,
@@ -110,6 +123,77 @@ class MemoryStore:
             {
                 "id": row["id"],
                 "content": row["content"],
+                "tags": self._from_json(row["tags_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def add_experiment_log_entry(self, entry: dict) -> int:
+        now = self._now()
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO experiment_log_entries (
+                    task,
+                    model,
+                    dataset,
+                    metric_problem,
+                    tried_methods_json,
+                    observation,
+                    goal,
+                    tags_json,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry["task"],
+                    entry["model"],
+                    entry["dataset"],
+                    entry["metric_problem"],
+                    self._to_json(entry.get("tried_methods", [])),
+                    entry["observation"],
+                    entry["goal"],
+                    self._to_json(entry.get("tags", [])),
+                    now,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def list_experiment_log_entries(self, limit: int = 50) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    task,
+                    model,
+                    dataset,
+                    metric_problem,
+                    tried_methods_json,
+                    observation,
+                    goal,
+                    tags_json,
+                    created_at
+                FROM experiment_log_entries
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "task": row["task"],
+                "model": row["model"],
+                "dataset": row["dataset"],
+                "metric_problem": row["metric_problem"],
+                "tried_methods": self._from_json(row["tried_methods_json"]),
+                "observation": row["observation"],
+                "goal": row["goal"],
                 "tags": self._from_json(row["tags_json"]),
                 "created_at": row["created_at"],
             }

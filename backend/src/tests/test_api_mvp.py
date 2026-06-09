@@ -469,6 +469,85 @@ def test_logs_endpoint_saves_and_lists_logs(tmp_path):
     app.dependency_overrides.clear()
 
 
+def experiment_log_payload():
+    return {
+        "task": "defect classification",
+        "model": "1D-CNN",
+        "dataset": "bearing fault dataset",
+        "metric_problem": "minority class PRAUC is low",
+        "tried_methods": ["class weighting", "focal loss"],
+        "observation": "recall improves but precision collapses",
+        "goal": "improve PRAUC without making model too heavy",
+        "tags": ["imbalanced-learning"],
+    }
+
+
+def test_experiment_logs_endpoint_saves_and_lists_structured_logs(tmp_path):
+    test_db = tmp_path / "api-experiment-logs.sqlite3"
+    app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)
+    client = TestClient(app)
+
+    response = client.post("/experiments/logs", json=experiment_log_payload())
+    assert response.status_code == 200
+    assert response.json()["id"] == 1
+
+    logs = client.get("/experiments/logs")
+    assert logs.status_code == 200
+    assert logs.json()[0]["task"] == "defect classification"
+    assert logs.json()[0]["tried_methods"] == ["class weighting", "focal loss"]
+
+    app.dependency_overrides.clear()
+
+
+def test_ideas_recommend_endpoint_returns_deterministic_no_source_ideas(tmp_path):
+    test_db = tmp_path / "api-ideas.sqlite3"
+    store = get_memory_store(str(test_db))
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    client = TestClient(app)
+
+    response = client.post(
+        "/ideas/recommend",
+        json={
+            "experiment_log": experiment_log_payload(),
+            "save_log": True,
+            "include_discovery": False,
+            "top_k": 5,
+            "idea_count": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["log_id"] == 1
+    assert body["mode"] == "deterministic"
+    assert body["discovery"]["enabled"] is False
+    assert len(body["ideas"]) == 3
+    assert body["ideas"][0]["supporting_evidence"] == []
+
+    app.dependency_overrides.clear()
+
+
+def test_ideas_recommend_rejects_blank_required_fields(tmp_path):
+    test_db = tmp_path / "api-ideas-invalid.sqlite3"
+    app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)
+    client = TestClient(app)
+
+    payload = experiment_log_payload()
+    payload["task"] = ""
+
+    response = client.post(
+        "/ideas/recommend",
+        json={"experiment_log": payload},
+    )
+
+    assert response.status_code == 422
+
+    app.dependency_overrides.clear()
+
+
 def test_candidates_endpoint_returns_empty_list(tmp_path):
     test_db = tmp_path / "api.sqlite3"
     app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)

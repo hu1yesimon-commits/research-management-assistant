@@ -35,12 +35,18 @@
   写入实验日志
 - `GET /logs`
   读取实验日志
+- `POST /experiments/logs`
+  写入结构化实验日志，供 Idea Assistant MVP 使用
+- `GET /experiments/logs`
+  读取结构化实验日志
 - `GET /memory/summary`
   返回 `candidate_count`、`known_dois`、`recent_logs`
 - `POST /knowledge/search`
   输入 `{"query":"...","top_k":5}`，对已 `embedded` 的知识块执行 retrieval MVP，返回 chunk / paper 信息；当前只做召回，不做 RAG answer generation 或 LLM 总结
 - `POST /knowledge/answer`
   输入 `{"question":"...","top_k":5}`，基于 retrieval 结果返回 grounded answer MVP；当前默认使用 deterministic fake answer generator，不调用真实 LLM
+- `POST /ideas/recommend`
+  输入一条结构化实验日志，构造 retrieval query，检索本地已 `embedded` 的知识块，并返回 3-5 条结构化 idea options；默认 deterministic/offline，不默认调用真实 provider 或外部 discovery
 - `POST /research/query`
   输入 `{"query":"...","mode":"basic"|"advanced","include_discovery":true,"include_knowledge":true,"top_k":5}`，把外部 discovery 和内部 knowledge answer 编排到一个响应中；`discovery.candidates` 不是 grounded answer sources，`knowledge.sources` 只来自已 `embedded` 的知识块
 
@@ -53,7 +59,8 @@
 - 保存 judge result
 - 查询 candidate papers
 - 更新 paper 状态
-- 保存和查询 experiment logs
+- 保存和查询 legacy/simple `experiment_logs`
+- 保存和查询结构化 `experiment_log_entries`
 - 查询 known DOI
 - 保存、查询、删除 `knowledge_chunks`
 
@@ -62,7 +69,20 @@
 - `papers`
 - `paper_judgements`
 - `experiment_logs`
+- `experiment_log_entries`
 - `knowledge_chunks`
+
+## Idea Assistant MVP
+
+后端现在已经支持一个 deterministic 的 Idea Assistant MVP：
+
+- `POST /experiments/logs` 保存结构化实验日志
+- `GET /experiments/logs` 列出结构化实验日志
+- `POST /ideas/recommend` 基于单条结构化日志构造 retrieval query，检索本地已 `embedded` 的知识块，并返回 3-5 条结构化 idea options
+
+默认行为保持 deterministic 和 offline。默认测试路径不会真实调用 DeepSeek、OpenAI、BGE-M3、Chroma、arXiv 或 OpenAlex；这些真实 provider / 外部源路径如果将来需要启用，应走显式配置和单独的手动 smoke。
+
+Idea 的 `supporting_evidence` 只能来自 retrieval / discovery 返回对象，generator 不应编造 papers、chunks、citations 或 source details。
 
 `known DOI` 规则当前是：
 
@@ -119,12 +139,10 @@ Future manual entry 预留语义：
 - uploaded paper 的 DOI 会进入 `MemoryStore.list_known_dois()`
 - chunked paper 继续保留同一个 `pdf_path`
 
-当前已完成但不是默认配置：
+当前代码已预留但不是默认配置：
 
 - `EMBEDDING_PROVIDER=bge-m3` 时，可选真实 BGE-M3 provider 会参与 Phase 2D embedding
 - `VECTOR_BACKEND=chroma` 时，可选真实 Chroma adapter 会把向量写入本地 persist dir
-- 手动 smoke 已通过一条真实链路：
-  `chunked -> BGE-M3 -> Chroma -> vector_ref -> embedded`
 
 当前还没有做：
 

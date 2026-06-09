@@ -55,6 +55,27 @@ class LogRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class ExperimentLogRequest(BaseModel):
+    task: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    dataset: str = Field(min_length=1)
+    metric_problem: str = Field(min_length=1)
+    tried_methods: list[str] = Field(default_factory=list)
+    observation: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    tags: list[str] = Field(default_factory=list)
+
+
+class ExperimentLogEntry(ExperimentLogRequest):
+    id: int
+    created_at: str
+
+
+class ExperimentLogCreateResponse(BaseModel):
+    id: int
+    created_at: str
+
+
 class KnowledgeSearchRequest(BaseModel):
     query: str
     top_k: int = Field(default=5, ge=1, le=20)
@@ -93,6 +114,54 @@ class KnowledgeAnswerResponse(BaseModel):
     question: str
     answer: str
     sources: list[KnowledgeAnswerSource] = Field(default_factory=list)
+    mode: str
+
+
+class IdeaSupportingEvidence(BaseModel):
+    source_type: Literal["knowledge", "discovery"]
+    paper_id: str | None = None
+    title: str | None = None
+    chunk_index: int | None = None
+    distance: float | None = None
+    text: str | None = None
+    vector_ref: str | None = None
+
+
+class IdeaOption(BaseModel):
+    title: str
+    rationale: str
+    supporting_evidence: list[IdeaSupportingEvidence] = Field(default_factory=list)
+    expected_benefit: str
+    risk: str
+    suggested_validation_metric: str
+    next_small_experiment: str
+
+
+class IdeaKnowledgeSection(BaseModel):
+    sources: list[KnowledgeAnswerSource] = Field(default_factory=list)
+    error: str | None = None
+
+
+class IdeaDiscoverySection(BaseModel):
+    enabled: bool
+    candidates: list[dict] = Field(default_factory=list)
+    error: str | None = None
+
+
+class IdeaRecommendRequest(BaseModel):
+    experiment_log: ExperimentLogRequest
+    save_log: bool = True
+    include_discovery: bool = False
+    top_k: int = Field(default=5, ge=1, le=20)
+    idea_count: int = Field(default=3, ge=3, le=5)
+
+
+class IdeaRecommendResponse(BaseModel):
+    log_id: int | None = None
+    query: str
+    knowledge: IdeaKnowledgeSection
+    discovery: IdeaDiscoverySection
+    ideas: list[IdeaOption] = Field(default_factory=list)
     mode: str
 
 

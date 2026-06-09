@@ -9,13 +9,26 @@ from graph.builder import build_paper_discovery_graph
 from services.answer_service import AnswerGenerator, FakeGroundedAnswerGenerator, LLMAnswerGenerator, PromptBuilder
 from services.embedding_pipeline import EmbeddingPipelineError, EmbeddingPipelineService
 from services.embedding_service import BgeM3EmbeddingService, EmbeddingService, FakeEmbeddingService
+from services.idea_service import DeterministicIdeaGenerator, IdeaGenerator, IdeaRecommendationService, IdeaServiceError
 from services.knowledge_base import KnowledgeBase
 from services.LlmPaperSelect import LLMJudge
 from services.memory_store import MemoryStore
 from services.qa_service import KnowledgeQAService, QAServiceError
 from services.research_workflow import ResearchWorkflowError, ResearchWorkflowService
 from services.retrieval_service import KnowledgeRetrievalService, RetrievalServiceError
-from services.schemas import AcceptPaperRequest, KnowledgeAnswerRequest, KnowledgeSearchRequest, LogRequest, PaperStatus, ResearchQueryRequest, SearchRequest
+from services.schemas import (
+    AcceptPaperRequest,
+    ExperimentLogCreateResponse,
+    ExperimentLogEntry,
+    ExperimentLogRequest,
+    IdeaRecommendRequest,
+    KnowledgeAnswerRequest,
+    KnowledgeSearchRequest,
+    LogRequest,
+    PaperStatus,
+    ResearchQueryRequest,
+    SearchRequest,
+)
 from services.vector_store import ChromaVectorStoreService, FakeVectorStoreService, VectorStoreService
 
 
@@ -146,6 +159,36 @@ def get_answer_mode() -> str:
     if config.answer_provider == "deterministic":
         return "deterministic"
     return "llm"
+
+
+def get_idea_generator() -> IdeaGenerator:
+    if config.idea_provider == "deterministic":
+        return DeterministicIdeaGenerator()
+    raise ValueError(f"unsupported IDEA_PROVIDER: {config.idea_provider}")
+
+
+def get_idea_mode() -> str:
+    return config.idea_provider
+
+
+def get_idea_recommendation_service(
+    store: MemoryStore = Depends(get_memory_store),
+    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    vector_store_service: VectorStoreService = Depends(get_vector_store_service),
+    idea_generator: IdeaGenerator = Depends(get_idea_generator),
+) -> IdeaRecommendationService:
+    retrieval_service = KnowledgeRetrievalService(
+        store=store,
+        embedding_service=embedding_service,
+        vector_store_service=vector_store_service,
+    )
+    return IdeaRecommendationService(
+        store=store,
+        retrieval_service=retrieval_service,
+        idea_generator=idea_generator,
+        discovery_graph=None,
+        mode=get_idea_mode(),
+    )
 
 
 def get_embedding_pipeline_service(
@@ -333,6 +376,38 @@ def add_log(request: LogRequest, store: MemoryStore = Depends(get_memory_store))
 @app.get("/logs")
 def list_logs(store: MemoryStore = Depends(get_memory_store)):
     return store.list_experiment_logs()
+
+
+@app.post("/experiments/logs", response_model=ExperimentLogCreateResponse)
+def add_experiment_log_entry(
+    request: ExperimentLogRequest,
+    store: MemoryStore = Depends(get_memory_store),
+):
+    log_id = store.add_experiment_log_entry(request.model_dump())
+    entry = store.list_experiment_log_entries(limit=1)[0]
+    return ExperimentLogCreateResponse(id=log_id, created_at=entry["created_at"])
+
+
+@app.get("/experiments/logs", response_model=list[ExperimentLogEntry])
+def list_experiment_log_entries(store: MemoryStore = Depends(get_memory_store)):
+    return store.list_experiment_log_entries()
+
+
+@app.post("/ideas/recommend")
+def recommend_ideas(
+    request: IdeaRecommendRequest,
+    service: IdeaRecommendationService = Depends(get_idea_recommendation_service),
+):
+    try:
+        return service.recommend(
+            experiment_log=request.experiment_log,
+            save_log=request.save_log,
+            include_discovery=request.include_discovery,
+            top_k=request.top_k,
+            idea_count=request.idea_count,
+        )
+    except IdeaServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @app.get("/memory/summary")

@@ -50,6 +50,21 @@ def test_initialize_creates_sqlite_tables(tmp_path):
     }
 
 
+def test_initialize_creates_structured_experiment_log_entries_table(tmp_path):
+    db_path = tmp_path / "memory.sqlite3"
+    store = MemoryStore(str(db_path))
+
+    store.initialize()
+
+    connection = sqlite3.connect(db_path)
+    rows = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+    ).fetchall()
+    connection.close()
+
+    assert "experiment_log_entries" in {row[0] for row in rows}
+
+
 def test_save_candidate_paper_can_be_listed(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
@@ -79,6 +94,55 @@ def test_add_experiment_log_can_be_listed(tmp_path):
     assert logs[0]["id"] == log_id
     assert logs[0]["content"] == "training loss is unstable"
     assert logs[0]["tags"] == ["block", "debug"]
+
+
+def test_add_structured_experiment_log_entry_can_be_listed(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+
+    log_id = store.add_experiment_log_entry(
+        {
+            "task": "defect classification",
+            "model": "1D-CNN",
+            "dataset": "bearing fault dataset",
+            "metric_problem": "minority class PRAUC is low",
+            "tried_methods": ["class weighting", "focal loss"],
+            "observation": "recall improves but precision collapses",
+            "goal": "improve PRAUC without making model too heavy",
+            "tags": ["imbalanced-learning", "lightweight"],
+        }
+    )
+
+    logs = store.list_experiment_log_entries()
+
+    assert log_id > 0
+    assert logs[0]["id"] == log_id
+    assert logs[0]["task"] == "defect classification"
+    assert logs[0]["tried_methods"] == ["class weighting", "focal loss"]
+    assert logs[0]["tags"] == ["imbalanced-learning", "lightweight"]
+    assert logs[0]["created_at"]
+
+
+def test_structured_experiment_logs_are_separate_from_legacy_logs(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+
+    store.add_experiment_log("legacy note", tags=["block"])
+    store.add_experiment_log_entry(
+        {
+            "task": "defect classification",
+            "model": "1D-CNN",
+            "dataset": "bearing fault dataset",
+            "metric_problem": "minority class PRAUC is low",
+            "tried_methods": [],
+            "observation": "recall improves but precision collapses",
+            "goal": "improve PRAUC without making model too heavy",
+            "tags": [],
+        }
+    )
+
+    assert store.list_experiment_logs()[0]["content"] == "legacy note"
+    assert store.list_experiment_log_entries()[0]["task"] == "defect classification"
 
 
 def test_build_memory_context_joins_recent_logs(tmp_path):
