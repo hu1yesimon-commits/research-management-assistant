@@ -104,6 +104,11 @@ class ResearchQueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
 
 
+class AcceptPaperRequest(BaseModel):
+    paper: PaperMetadata | None = None
+    judgement: JudgeResult | None = None
+
+
 class ResearchDiscoverySection(BaseModel):
     enabled: bool
     candidates: list[dict] = Field(default_factory=list)

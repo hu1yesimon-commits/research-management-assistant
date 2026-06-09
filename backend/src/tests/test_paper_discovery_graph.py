@@ -41,7 +41,7 @@ class FakeJudge:
         return sorted(results, key=lambda item: item.final_score, reverse=True)
 
 
-def test_basic_paper_discovery_graph_persists_candidates(tmp_path):
+def test_basic_paper_discovery_graph_returns_ranked_candidates_without_persisting(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
     graph = build_paper_discovery_graph(
@@ -66,7 +66,7 @@ def test_basic_paper_discovery_graph_persists_candidates(tmp_path):
 
     assert result["rewritten_queries"] == ["graph reconstruction"]
     assert result["ranked_candidates"][0]["paper"].paper_id == "paper-graph-reconstruction"
-    assert store.list_candidate_papers()[0]["paper_id"] == "paper-graph-reconstruction"
+    assert store.list_candidate_papers() == []
 
 
 def test_advanced_graph_uses_memory_context_for_rewritten_queries(tmp_path):

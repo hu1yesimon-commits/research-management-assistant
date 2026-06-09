@@ -51,11 +51,6 @@ def make_nodes(
             "ranked_candidates": ranked_candidates,
         }
 
-    def persist_candidates(state: PaperDiscoveryState) -> dict:
-        for item in state["ranked_candidates"]:
-            memory_store.save_candidate_paper(item["paper"], item["judgement"])
-        return {}
-
     return {
         "load_memory_context": load_memory_context,
         "rewrite_query": rewrite_query,
@@ -63,7 +58,6 @@ def make_nodes(
         "dedup_papers": dedup_papers,
         "judge_papers": judge_papers,
         "rank_papers": rank_papers,
-        "persist_candidates": persist_candidates,
     }
 
 

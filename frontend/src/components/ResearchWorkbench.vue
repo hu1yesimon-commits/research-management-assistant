@@ -27,7 +27,11 @@
 
     <section class="workspace-grid">
       <KnowledgePanel :knowledge="knowledgeSection" />
-      <DiscoveryPanel :discovery="discoverySection" />
+      <DiscoveryPanel
+        :discovery="discoverySection"
+        :action-states="candidateActionStates"
+        @accept="handleDiscoveryAccept"
+      />
     </section>
 
     <CandidateLifecyclePanel
@@ -175,6 +179,21 @@ async function handleAccept(paperId) {
   await runCandidateAction(paperId, async () => {
     const result = await acceptPaper(paperId);
     return `Accepted: ${result.status}`;
+  });
+}
+
+async function handleDiscoveryAccept(candidate) {
+  const paperId = candidate?.paper?.paper_id;
+  if (!paperId || !candidate?.paper) {
+    return;
+  }
+
+  await runCandidateAction(paperId, async () => {
+    const result = await acceptPaper(paperId, {
+      paper: candidate.paper,
+      judgement: candidate.judgement || null,
+    });
+    return `Saved and accepted: ${result.status}`;
   });
 }
 

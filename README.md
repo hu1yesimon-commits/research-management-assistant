@@ -1,6 +1,6 @@
 # Research Management MVP
 
-当前仓库已经落地的是一个后端 MVP：`FastAPI + LangGraph + SQLite`，用于论文候选检索、排序、持久化和实验日志记录。
+当前仓库已经落地的是一个后端 MVP：`FastAPI + LangGraph + SQLite`，用于论文候选检索、accept 后持久化，以及实验日志记录。
 
 本文档只同步已经完成的事实，不把计划中的真实 embedding provider、RAG retrieval、前端工作台写成已完成；`Advanced-lite` 目前也只是 deterministic placeholder，不是真实 LLM / RAG research agent。
 
@@ -22,11 +22,11 @@
   返回 `{"status": "ok"}`
 - `POST /search`
   输入 `{"mode":"basic"|"advanced","query":"..."}`
-  调用 paper discovery graph，返回 ranked candidates，并把 candidate + judgement 写入 SQLite
+  调用 paper discovery graph，返回 ranked candidates；discovery results 默认不写入 SQLite
 - `GET /papers/candidates`
   从 SQLite 读取候选论文
 - `POST /papers/{paper_id}/accept`
-  将已存在论文的状态更新为 `accepted`
+  Discovery 主路径下接收 `paper` 和可选 `judgement` payload，首次把 paper 保存到 SQLite 并标记为 `accepted`；如果 paper 已存在，也兼容无 body 的状态更新路径
 - `POST /papers/{paper_id}/upload_pdf`
   接收 multipart PDF 文件，保存到本地 upload 目录，把论文状态更新为 `uploaded`，并记录 `pdf_path`
 - `POST /papers/{paper_id}/embed`
@@ -73,19 +73,22 @@
 
 当前 `paper` 生命周期不应理解为强制线性流程，而应理解为“推荐路径 + 当前允许的可选路径”。
 
-推荐路径：
+Discovery entry 推荐路径：
 
-`candidate -> accept -> accepted -> upload_pdf -> uploaded -> embed -> chunked -> embed -> embedded`
+`discovery candidate -> accepted -> upload_pdf -> uploaded -> embed -> chunked -> embed -> embedded`
 
-当前代码允许的可选路径还包括：
+Future manual entry 预留语义：
 
-- `candidate -> upload_pdf -> uploaded`
-- `candidate -> accept -> accepted -> upload_pdf -> uploaded`
+`manual PDF upload -> uploaded -> chunked -> embedded`
+
+当前代码允许的已实现路径还包括：
+
+- `accepted -> upload_pdf -> uploaded`
 
 各状态含义：
 
-- `candidate` = 系统检索、judge、rank 后写入 SQLite 的推荐候选论文
-- `accepted` = 可选的人工确认状态，表示用户已经认可这篇论文，但还没有上传 PDF
+- `discovery candidate` = `/search` 或 `/research/query` 返回的临时检索结果，默认不写入 SQLite
+- `accepted` = 用户点击 `Accept` 后保存到 SQLite 的论文，还没有上传 PDF
 - `uploaded` = PDF 已保存到本地 upload 目录，`pdf_path` 已记录，DOI 会进入强去重集合
 - `chunked` = PDF 文本抽取成功，chunks 已持久化到 `knowledge_chunks`；这仍然不是“真实 embedding 完成”
 - `embedded` = embedding pipeline 已完成，且所有目标 chunk 都有可追踪的非空 `vector_ref`
@@ -96,7 +99,11 @@
 
 推荐使用路径：
 
-`candidate -> accept -> accepted -> upload_pdf -> uploaded -> embed -> chunked -> embed -> embedded`
+`discovery candidate -> accepted -> upload_pdf -> uploaded -> embed -> chunked -> embed -> embedded`
+
+未来可能新增但当前尚未实现的新入口语义：
+
+`manual PDF upload -> uploaded -> chunked -> embedded`
 
 当前实际行为：
 
@@ -105,7 +112,7 @@
 - 文件名会做基础安全归一化
 - `upload_pdf` 会把 `papers.status` 更新为 `uploaded`
 - `upload_pdf` 会记录本地 `pdf_path`
-- 因此当前既支持 `candidate -> upload_pdf -> uploaded`，也支持 `candidate -> accept -> accepted -> upload_pdf -> uploaded`
+- 因此当前支持 `accepted -> upload_pdf -> uploaded`
 - `embed` 对 `uploaded` 论文执行 Phase 2C：本地 PDF 文本抽取和 chunk persistence；失败时保持 `uploaded`
 - `embed` 对 `chunked` 论文执行 embedding pipeline；只有全部目标 chunk 拿到非空 `vector_ref` 才会进入 `embedded`
 - `embed` 在 Phase 2D 重跑时会替换旧 `vector_ref`，失败时保持 `chunked`
@@ -131,7 +138,7 @@
 
 当前 `/search` 走的是同步后端链路：
 
-`request -> rewrite_query -> multi_source_search -> dedup_papers -> judge_papers -> rank_papers -> persist_candidates`
+`request -> rewrite_query -> multi_source_search -> dedup_papers -> judge_papers -> rank_papers`
 
 当前 graph 行为：
 
@@ -139,7 +146,7 @@
 - `advanced` 模式下 query rewrite 是 deterministic placeholder，不是真实 LLM / RAG agent
 - dedup 会结合 `MemoryStore.list_known_dois()` 和当前 batch 的 title 弱去重
 - judge 仍然是 mock `LLMJudge`
-- 排序后会把 candidate 和 judgement 持久化到 SQLite
+- 排序后只返回 discovery candidates，不会自动持久化到 SQLite
 
 当前 Advanced-lite placeholder 规则：
 
@@ -185,6 +192,7 @@ curl -s http://127.0.0.1:8000/memory/summary
 
 - 页面加载时调用 `GET /health` 显示 backend status
 - 查询工作台把 unified workflow 分成 `knowledge` 和 `discovery` 两个 section
+- `discovery` 只表示 current query results，只有点击 `Accept` 后才会进入 SQLite saved lifecycle
 - `discovery.candidates` 只表示推荐阅读候选，不等同于 grounded answer sources
 - `knowledge.sources` 只表示已 `embedded` 本地知识库证据
 - candidates 面板支持调用：

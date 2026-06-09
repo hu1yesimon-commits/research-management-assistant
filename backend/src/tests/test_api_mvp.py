@@ -440,25 +440,32 @@ def test_candidates_endpoint_returns_empty_list(tmp_path):
     app.dependency_overrides.clear()
 
 
-def test_search_persists_candidates_without_network(tmp_path):
+def test_search_returns_candidates_without_persisting_to_sqlite(tmp_path):
     test_db = tmp_path / "api.sqlite3"
-    app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)
-    app.dependency_overrides[get_paper_discovery_graph] = lambda: FakeGraph(get_memory_store(str(test_db)))
+    store = get_memory_store(str(test_db))
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_paper_discovery_graph] = lambda: build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=FakeJudge(),
+        memory_store=store,
+        query_rewriter=QueryRewriter(),
+    )
     client = TestClient(app)
 
     response = client.post("/search", json={"mode": "basic", "query": "graph reconstruction"})
 
     assert response.status_code == 200
     body = response.json()
-    assert body[0]["paper"]["paper_id"] == "api-paper-1"
+    assert body[0]["paper"]["paper_id"] == "api-graph-reconstruction"
 
     candidates = client.get("/papers/candidates")
     assert candidates.status_code == 200
-    assert candidates.json()[0]["paper_id"] == "api-paper-1"
+    assert candidates.json() == []
 
     summary = client.get("/memory/summary")
     assert summary.status_code == 200
-    assert summary.json()["candidate_count"] == 1
+    assert summary.json()["candidate_count"] == 0
 
     app.dependency_overrides.clear()
 
@@ -488,7 +495,41 @@ def test_advanced_search_uses_deterministic_memory_context_rewriting(tmp_path):
 
     summary = client.get("/memory/summary")
     assert summary.status_code == 200
-    assert summary.json()["candidate_count"] >= 3
+    assert summary.json()["candidate_count"] == 0
+
+    app.dependency_overrides.clear()
+
+
+def test_research_query_discovery_returns_candidates_without_persisting_to_sqlite(tmp_path):
+    test_db = tmp_path / "api-research-query-no-persist.sqlite3"
+    store = get_memory_store(str(test_db))
+    workflow = ResearchWorkflowService(
+        discovery_graph=build_paper_discovery_graph(
+            search_service=FakeSearchService(),
+            judge=FakeJudge(),
+            memory_store=store,
+            query_rewriter=QueryRewriter(),
+        ),
+        knowledge_qa_service=FakeKnowledgeQAService(),
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_research_workflow_service] = lambda: workflow
+    client = TestClient(app)
+
+    response = client.post(
+        "/research/query",
+        json={
+            "query": "graph reconstruction",
+            "include_discovery": True,
+            "include_knowledge": False,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["discovery"]["candidates"][0]["paper"]["paper_id"] == "api-graph-reconstruction"
+    assert client.get("/papers/candidates").json() == []
 
     app.dependency_overrides.clear()
 
@@ -531,7 +572,7 @@ def test_upload_pdf_updates_candidate_to_uploaded_and_known_doi(tmp_path):
     app.dependency_overrides.clear()
 
 
-def test_accept_paper_updates_candidate_to_accepted(tmp_path):
+def test_accept_existing_paper_without_body_updates_status_as_compatibility_path(tmp_path):
     test_db = tmp_path / "api-accept.sqlite3"
     store = get_memory_store(str(test_db))
     paper = PaperMetadata(
@@ -561,7 +602,49 @@ def test_accept_paper_updates_candidate_to_accepted(tmp_path):
     app.dependency_overrides.clear()
 
 
-def test_accept_paper_returns_404_for_unknown_paper(tmp_path):
+def test_accept_discovery_candidate_with_payload_persists_and_accepts_main_path(tmp_path):
+    test_db = tmp_path / "api-accept-new.sqlite3"
+    app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)
+    client = TestClient(app)
+
+    response = client.post(
+        "/papers/accept-paper-2/accept",
+        json={
+            "paper": {
+                "paper_id": "accept-paper-2",
+                "source_ids": {"doi": "10.1000/accept-paper-2"},
+                "title": "Accept New Paper",
+                "authors": ["Tester"],
+                "abstract": "Useful abstract.",
+                "doi": "10.1000/accept-paper-2",
+                "source": "test",
+            },
+            "judgement": {
+                "decision": "accept",
+                "reason": "Relevant",
+                "llm_relevance_score": 0.9,
+                "embedding_relevance_score": 0.8,
+                "quality_score": 0.7,
+                "novelty_score": 1.0,
+                "final_score": 0.85,
+                "tags": ["fake"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"paper_id": "accept-paper-2", "status": "accepted"}
+
+    candidates = client.get("/papers/candidates")
+    assert candidates.status_code == 200
+    assert candidates.json()[0]["paper_id"] == "accept-paper-2"
+    assert candidates.json()[0]["status"] == "accepted"
+    assert candidates.json()[0]["judgement"]["decision"] == "accept"
+
+    app.dependency_overrides.clear()
+
+
+def test_accept_missing_paper_without_payload_is_rejected_as_invalid_path(tmp_path):
     test_db = tmp_path / "api-accept-missing.sqlite3"
     app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)
     client = TestClient(app)
@@ -569,6 +652,46 @@ def test_accept_paper_returns_404_for_unknown_paper(tmp_path):
     response = client.post("/papers/missing-paper/accept")
 
     assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "paper not found: missing-paper; paper metadata is required to save a new discovery candidate. "
+        "Provide paper and optional judgement payload."
+    )
+
+    app.dependency_overrides.clear()
+
+
+def test_accept_rejects_mismatched_path_and_body_paper_id(tmp_path):
+    test_db = tmp_path / "api-accept-mismatch.sqlite3"
+    app.dependency_overrides[get_memory_store] = override_store_with_path(test_db)
+    client = TestClient(app)
+
+    response = client.post(
+        "/papers/path-paper/accept",
+        json={
+            "paper": {
+                "paper_id": "body-paper",
+                "source_ids": {"doi": "10.1000/body-paper"},
+                "title": "Body Paper",
+                "authors": ["Tester"],
+                "abstract": "Useful abstract.",
+                "doi": "10.1000/body-paper",
+                "source": "test",
+            },
+            "judgement": {
+                "decision": "accept",
+                "reason": "Relevant",
+                "llm_relevance_score": 0.9,
+                "embedding_relevance_score": 0.8,
+                "quality_score": 0.7,
+                "novelty_score": 1.0,
+                "final_score": 0.85,
+                "tags": ["fake"],
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "paper_id mismatch: path=path-paper body=body-paper"
 
     app.dependency_overrides.clear()
 

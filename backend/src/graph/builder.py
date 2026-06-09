@@ -28,7 +28,7 @@ def build_paper_discovery_graph(
     """
     Graph flow:
     load_memory_context -> rewrite_query -> multi_source_search
-    -> dedup_papers -> judge_papers -> rank_papers -> persist_candidates
+    -> dedup_papers -> judge_papers -> rank_papers
     """
     if memory_store is None:
         raise ValueError("memory_store is required")
@@ -50,7 +50,6 @@ def build_paper_discovery_graph(
     builder.add_edge("multi_source_search", "dedup_papers")
     builder.add_edge("dedup_papers", "judge_papers")
     builder.add_edge("judge_papers", "rank_papers")
-    builder.add_edge("rank_papers", "persist_candidates")
-    builder.add_edge("persist_candidates", END)
+    builder.add_edge("rank_papers", END)
 
     return builder.compile()

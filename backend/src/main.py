@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Body, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 
@@ -14,7 +14,7 @@ from services.memory_store import MemoryStore
 from services.qa_service import KnowledgeQAService, QAServiceError
 from services.research_workflow import ResearchWorkflowError, ResearchWorkflowService
 from services.retrieval_service import KnowledgeRetrievalService, RetrievalServiceError
-from services.schemas import KnowledgeAnswerRequest, KnowledgeSearchRequest, LogRequest, PaperStatus, ResearchQueryRequest, SearchRequest
+from services.schemas import AcceptPaperRequest, KnowledgeAnswerRequest, KnowledgeSearchRequest, LogRequest, PaperStatus, ResearchQueryRequest, SearchRequest
 from services.vector_store import ChromaVectorStoreService, FakeVectorStoreService, VectorStoreService
 
 
@@ -208,10 +208,26 @@ def list_candidates(store: MemoryStore = Depends(get_memory_store)):
 @app.post("/papers/{paper_id}/accept")
 def accept_paper(
     paper_id: str,
+    payload: AcceptPaperRequest | None = Body(default=None),
     store: MemoryStore = Depends(get_memory_store),
 ):
-    if store.get_paper(paper_id) is None:
-        raise HTTPException(status_code=404, detail=f"paper not found: {paper_id}")
+    existing = store.get_paper(paper_id)
+
+    if existing is None:
+        if payload is None or payload.paper is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"paper not found: {paper_id}; paper metadata is required to save a new discovery candidate. "
+                    "Provide paper and optional judgement payload."
+                ),
+            )
+        if payload.paper.paper_id != paper_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"paper_id mismatch: path={paper_id} body={payload.paper.paper_id}",
+            )
+        store.save_candidate_paper(payload.paper, payload.judgement)
 
     store.update_paper_status(paper_id, PaperStatus.accepted.value)
     return {"paper_id": paper_id, "status": PaperStatus.accepted.value}

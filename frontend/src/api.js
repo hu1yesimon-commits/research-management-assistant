@@ -40,9 +40,15 @@ export function getCandidates() {
   return request("/papers/candidates");
 }
 
-export function acceptPaper(paperId) {
+export function acceptPaper(paperId, payload = null) {
   return request(`/papers/${paperId}/accept`, {
     method: "POST",
+    headers: payload
+      ? {
+          "Content-Type": "application/json",
+        }
+      : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
   });
 }
 

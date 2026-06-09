@@ -26,4 +26,30 @@ describe("DiscoveryPanel", () => {
     expect(wrapper.text()).toContain("Sparse Candidate");
     expect(wrapper.text()).toContain("candidate-1");
   });
+
+  test("emits accept with the current candidate payload", async () => {
+    const candidate = {
+      paper: {
+        paper_id: "candidate-2",
+        title: "Actionable Candidate",
+      },
+      judgement: {
+        decision: "accept",
+      },
+    };
+
+    const wrapper = mount(DiscoveryPanel, {
+      props: {
+        discovery: {
+          enabled: true,
+          candidates: [candidate],
+          error: null,
+        },
+      },
+    });
+
+    await wrapper.get('button[type="button"]').trigger("click");
+
+    expect(wrapper.emitted("accept")).toEqual([[candidate]]);
+  });
 });
