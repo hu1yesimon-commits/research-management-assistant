@@ -10,7 +10,7 @@ def test_calculate_final_score_applies_each_weight_coefficient():
             quality_score=0.0,
             novelty_score=0.0,
         )
-        == 0.35
+        == 0.4
     )
     assert (
         ScoreUtils.calculate_final_score(
@@ -19,7 +19,7 @@ def test_calculate_final_score_applies_each_weight_coefficient():
             quality_score=0.0,
             novelty_score=0.0,
         )
-        == 0.2
+        == 0.15
     )
     assert (
         ScoreUtils.calculate_final_score(
@@ -49,7 +49,41 @@ def test_calculate_final_score_uses_expected_weights():
         novelty_score=0.5,
     )
 
-    assert score == 0.725
+    assert score == 0.73
+
+
+def test_calculate_embedding_relevance_score_uses_query_title_abstract_overlap():
+    paper = PaperMetadata(
+        paper_id="paper-overlap",
+        source_ids=PaperId(),
+        title="Graph Reconstruction with Sparse Priors",
+        abstract="This paper studies graph reconstruction and sparse signals.",
+        source="test",
+    )
+
+    score = ScoreUtils.calculate_embedding_relevance_score(
+        query="graph reconstruction sparse priors",
+        paper=paper,
+    )
+
+    assert score == 1.0
+
+
+def test_calculate_embedding_relevance_score_returns_zero_when_query_has_no_overlap():
+    paper = PaperMetadata(
+        paper_id="paper-no-overlap",
+        source_ids=PaperId(),
+        title="Protein Folding by Diffusion",
+        abstract="We model protein conformations with diffusion models.",
+        source="test",
+    )
+
+    score = ScoreUtils.calculate_embedding_relevance_score(
+        query="graph reconstruction sparse priors",
+        paper=paper,
+    )
+
+    assert score == 0.0
 
 
 def test_calculate_novelty_score_defaults_when_date_missing():

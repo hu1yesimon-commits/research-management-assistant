@@ -2,6 +2,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import main
+from config import config
 from graph.builder import build_paper_discovery_graph
 from main import (
     app,
@@ -72,7 +74,7 @@ class FakeSearchService:
 
 
 class FakeJudge:
-    def judge(self, paper: PaperMetadata) -> JudgeResult:
+    def judge(self, query: str, paper: PaperMetadata) -> JudgeResult:
         return JudgeResult(
             decision="accept",
             reason="Relevant",
@@ -179,6 +181,46 @@ def test_health_endpoint_allows_vite_cors_origin():
     assert response.headers["access-control-allow-credentials"] == "true"
 
 
+def test_get_paper_judge_returns_mock_provider_by_default():
+    judge = main.get_paper_judge()
+
+    assert judge.provider_name == "mock"
+
+
+def test_get_paper_judge_builds_deepseek_provider_from_explicit_config(monkeypatch):
+    original_provider = config.paper_judge_provider
+    original_model = config.paper_judge_model
+    original_api_key = config.deepseek_api_key
+    original_base_url = config.deepseek_base_url
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def invoke(self, prompt: str):
+            return '{"decision":"accept","llm_relevance_score":0.8,"quality_score":0.7,"reason":"ok","tags":["deepseek"]}'
+
+    try:
+        monkeypatch.setattr(main, "ChatOpenAI", FakeChatOpenAI)
+        config.paper_judge_provider = "deepseek"
+        config.paper_judge_model = "deepseek-reasoner"
+        config.deepseek_api_key = "test-key"
+        config.deepseek_base_url = "https://example.invalid/v1"
+
+        judge = main.get_paper_judge()
+
+        assert judge.provider_name == "deepseek"
+        assert isinstance(judge.llm_client, FakeChatOpenAI)
+        assert judge.llm_client.kwargs["model"] == "deepseek-reasoner"
+        assert judge.llm_client.kwargs["api_key"] == "test-key"
+        assert judge.llm_client.kwargs["base_url"] == "https://example.invalid/v1"
+    finally:
+        config.paper_judge_provider = original_provider
+        config.paper_judge_model = original_model
+        config.deepseek_api_key = original_api_key
+        config.deepseek_base_url = original_base_url
+
+
 def test_knowledge_search_returns_retrieved_results_for_embedded_chunks(tmp_path):
     test_db = tmp_path / "api-knowledge.sqlite3"
     store = get_memory_store(str(test_db))
@@ -192,7 +234,7 @@ def test_knowledge_search_returns_retrieved_results_for_embedded_chunks(tmp_path
         doi="10.1000/knowledge-paper-1",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "embedded", pdf_path="/tmp/knowledge-paper.pdf")
     vector_ref = vector_store.upsert_chunks(
         [
@@ -270,7 +312,7 @@ def test_knowledge_answer_returns_answer_and_sources_for_embedded_chunks(tmp_pat
         doi="10.1000/knowledge-answer-paper-1",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "embedded", pdf_path="/tmp/knowledge-answer-paper.pdf")
     vector_ref = vector_store.upsert_chunks(
         [
@@ -547,7 +589,7 @@ def test_upload_pdf_updates_candidate_to_uploaded_and_known_doi(tmp_path):
         doi="10.1000/upload-paper-1",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
 
     app.dependency_overrides[get_memory_store] = lambda: store
     app.dependency_overrides[get_knowledge_base] = lambda: KnowledgeBase(upload_dir=str(upload_dir))
@@ -584,7 +626,7 @@ def test_accept_existing_paper_without_body_updates_status_as_compatibility_path
         doi="10.1000/accept-paper-1",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
 
     app.dependency_overrides[get_memory_store] = lambda: store
     client = TestClient(app)
@@ -709,7 +751,7 @@ def test_embed_updates_uploaded_paper_to_chunked_and_persists_chunks(tmp_path):
         doi="10.1000/embed-paper-1",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     pdf_path = KnowledgeBase(upload_dir=str(upload_dir)).save_pdf(
         paper_id=paper.paper_id,
         filename="paper.pdf",
@@ -756,7 +798,7 @@ def test_embed_returns_400_for_paper_that_is_not_uploaded(tmp_path):
         doi="10.1000/embed-paper-2",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
 
     app.dependency_overrides[get_memory_store] = lambda: store
     client = TestClient(app)
@@ -792,7 +834,7 @@ def test_embed_returns_400_for_uploaded_paper_with_missing_pdf_path(tmp_path):
         doi="10.1000/embed-paper-missing-pdf",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "uploaded")
 
     app.dependency_overrides[get_memory_store] = lambda: store
@@ -821,7 +863,7 @@ def test_embed_keeps_uploaded_status_when_extraction_fails(tmp_path):
         doi="10.1000/embed-paper-fail",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     pdf_path = KnowledgeBase(upload_dir=str(upload_dir)).save_pdf(
         paper_id=paper.paper_id,
         filename="paper.pdf",
@@ -855,7 +897,7 @@ def test_embed_rebuild_overwrites_old_chunks_for_uploaded_paper(tmp_path):
         doi="10.1000/embed-paper-rebuild",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     pdf_path = KnowledgeBase(upload_dir=str(upload_dir)).save_pdf(
         paper_id=paper.paper_id,
         filename="paper.pdf",
@@ -897,7 +939,7 @@ def test_embed_updates_chunked_paper_to_embedded_and_writes_vector_refs(tmp_path
         doi="10.1000/chunked-paper-1",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
     store.insert_knowledge_chunks(
         paper.paper_id,
@@ -941,7 +983,7 @@ def test_embed_returns_400_for_chunked_paper_with_no_chunks(tmp_path):
         doi="10.1000/chunked-paper-no-chunks",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
 
     app.dependency_overrides[get_memory_store] = lambda: store
@@ -969,7 +1011,7 @@ def test_embed_keeps_chunked_status_when_embedding_fails(tmp_path):
         doi="10.1000/chunked-paper-embedding-fail",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
     store.insert_knowledge_chunks(
         paper.paper_id,
@@ -1002,7 +1044,7 @@ def test_embed_keeps_chunked_status_when_vector_store_write_fails(tmp_path):
         doi="10.1000/chunked-paper-vector-store-fail",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
     store.insert_knowledge_chunks(
         paper.paper_id,
@@ -1035,7 +1077,7 @@ def test_embed_keeps_chunked_status_when_any_vector_ref_is_empty(tmp_path):
         doi="10.1000/chunked-paper-empty-vector-ref",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
     store.insert_knowledge_chunks(
         paper.paper_id,
@@ -1072,7 +1114,7 @@ def test_embed_replaces_stale_vector_refs_for_chunked_paper(tmp_path):
         doi="10.1000/chunked-paper-rebuild",
         source="test",
     )
-    store.save_candidate_paper(paper, FakeJudge().judge(paper))
+    store.save_candidate_paper(paper, FakeJudge().judge(query="graph reconstruction", paper=paper))
     store.update_paper_status(paper.paper_id, "chunked", pdf_path="/tmp/chunked-paper.pdf")
     store.insert_knowledge_chunks(
         paper.paper_id,

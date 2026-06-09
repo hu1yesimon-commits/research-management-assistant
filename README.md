@@ -145,8 +145,12 @@ Future manual entry 预留语义：
 - `basic` 模式下 query rewrite 返回原 query
 - `advanced` 模式下 query rewrite 是 deterministic placeholder，不是真实 LLM / RAG agent
 - dedup 会结合 `MemoryStore.list_known_dois()` 和当前 batch 的 title 弱去重
-- judge 仍然是 mock `LLMJudge`
+- `PAPER_JUDGE_PROVIDER=mock` 是默认离线路径，`PAPER_JUDGE_PROVIDER=deepseek` 是显式开启的可选真实 judge provider
+- LLM judge 只输出 `decision`、`reason`、`tags`、`llm_relevance_score`、`quality_score`
+- `embedding_relevance_score` 和 `novelty_score` 由本地规则函数计算，`final_score` 由 `ScoreUtils` 按固定权重 `0.40 / 0.15 / 0.25 / 0.20` 合成
+- 单篇 judge 失败时会降级为 `judge_failed` 的 fallback result，不会阻止其他 candidates 返回
 - 排序后只返回 discovery candidates，不会自动持久化到 SQLite
+- endpoint 级真实 smoke 可能受 arXiv / OpenAlex 搜索超时影响；当前更稳定的验收方式是直连 paper judge provider smoke
 
 当前 Advanced-lite placeholder 规则：
 
@@ -249,7 +253,6 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest \
 
 当前明确还没有完成：
 
-- 真实 LLM judging
 - 真实的 LLM / RAG query planning agent
 - 外网依赖下的稳定 search 集成测试
 - 完整 RAG 查询链路，以及 `/search` 到 retrieval 的联动

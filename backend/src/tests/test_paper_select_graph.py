@@ -20,10 +20,16 @@ def test_build_paper_select_graph_runs_end_to_end():
         source="test",
     )
 
-    result = graph.invoke({"papers": [paper_without_abstract, paper_with_abstract], "judge_results": []})
+    result = graph.invoke(
+        {
+            "papers": [paper_without_abstract, paper_with_abstract],
+            "judge_results": [],
+            "user_query": "useful abstract",
+        }
+    )
 
     assert [item.paper_id for item in result["papers"]] == ["paper-1", "paper-2"]
-    assert [item.decision for item in result["judge_results"]] == ["accept", "uncertain"]
+    assert [item.decision for item in result["judge_results"]] == ["uncertain", "uncertain"]
 
 
 def test_build_paper_select_graph_returns_ranked_judge_results_for_fake_papers():
@@ -44,10 +50,16 @@ def test_build_paper_select_graph_returns_ranked_judge_results_for_fake_papers()
         source="test",
     )
 
-    result = graph.invoke({"papers": [lower_ranked_paper, higher_ranked_paper], "judge_results": []})
+    result = graph.invoke(
+        {
+            "papers": [lower_ranked_paper, higher_ranked_paper],
+            "judge_results": [],
+            "user_query": "useful abstract",
+        }
+    )
 
-    assert [item.decision for item in result["judge_results"]] == ["accept", "uncertain"]
-    assert [item.final_score for item in result["judge_results"]] == [0.625, 0.24]
+    assert [item.decision for item in result["judge_results"]] == ["uncertain", "uncertain"]
+    assert [item.final_score for item in result["judge_results"]] == [0.725, 0.295]
 
 
 def test_build_paper_select_graph_filters_current_batch_weak_title_duplicates():
@@ -75,8 +87,14 @@ def test_build_paper_select_graph_filters_current_batch_weak_title_duplicates():
         source="test",
     )
 
-    result = graph.invoke({"papers": [first_duplicate, second_duplicate, unique_paper], "judge_results": []})
+    result = graph.invoke(
+        {
+            "papers": [first_duplicate, second_duplicate, unique_paper],
+            "judge_results": [],
+            "user_query": "graph neural networks",
+        }
+    )
 
     assert [item.paper_id for item in result["papers"]] == ["paper-1", "paper-2", "paper-3"]
-    assert [item.decision for item in result["judge_results"]] == ["accept", "uncertain"]
-    assert [item.final_score for item in result["judge_results"]] == [0.625, 0.24]
+    assert [item.decision for item in result["judge_results"]] == ["uncertain", "uncertain"]
+    assert [item.final_score for item in result["judge_results"]] == [0.725, 0.295]

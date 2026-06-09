@@ -21,5 +21,6 @@ class PaperDiscoveryState(TypedDict):
 
 
 class PaperSelectState(TypedDict):
+    user_query: str
     papers: list[PaperMetadata]
     judge_results: list[JudgeResult]

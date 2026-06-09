@@ -10,6 +10,7 @@ from services.answer_service import AnswerGenerator, FakeGroundedAnswerGenerator
 from services.embedding_pipeline import EmbeddingPipelineError, EmbeddingPipelineService
 from services.embedding_service import BgeM3EmbeddingService, EmbeddingService, FakeEmbeddingService
 from services.knowledge_base import KnowledgeBase
+from services.LlmPaperSelect import LLMJudge
 from services.memory_store import MemoryStore
 from services.qa_service import KnowledgeQAService, QAServiceError
 from services.research_workflow import ResearchWorkflowError, ResearchWorkflowService
@@ -70,8 +71,28 @@ def get_memory_store(database_path: str | None = None) -> MemoryStore:
     return store
 
 
-def get_paper_discovery_graph(store: MemoryStore = Depends(get_memory_store)):
-    return build_paper_discovery_graph(memory_store=store)
+def get_paper_judge() -> LLMJudge:
+    if config.paper_judge_provider == "mock":
+        return LLMJudge(provider_name="mock")
+    if config.paper_judge_provider == "deepseek":
+        return LLMJudge(
+            provider_name="deepseek",
+            llm_client=ChatOpenAI(
+                model=config.paper_judge_model,
+                temperature=0.0,
+                api_key=config.deepseek_api_key,
+                base_url=config.deepseek_base_url,
+            ),
+            model=config.paper_judge_model,
+        )
+    raise ValueError(f"unsupported PAPER_JUDGE_PROVIDER: {config.paper_judge_provider}")
+
+
+def get_paper_discovery_graph(
+    store: MemoryStore = Depends(get_memory_store),
+    judge: LLMJudge = Depends(get_paper_judge),
+):
+    return build_paper_discovery_graph(memory_store=store, judge=judge)
 
 
 def get_knowledge_base(upload_dir: str | None = None) -> KnowledgeBase:

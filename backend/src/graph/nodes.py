@@ -1,8 +1,12 @@
+import os
+
+from services.schemas import JudgeResult
 from services.LlmPaperSelect import LLMJudge
 from services.deduplicator import DeDuplicator
 from services.memory_store import MemoryStore
 from services.paper_search import PaperSearchService
 from services.query_rewriter import QueryRewriter
+from services.scoreutils import ScoreUtils
 from graph.state import PaperDiscoveryState, PaperSelectState
 
 
@@ -35,7 +39,36 @@ def make_nodes(
         return {"deduped_papers": deduplicator.dedup(state["normalized_papers"])}
 
     def judge_papers(state: PaperDiscoveryState) -> dict:
-        return {"judge_results": [judge.judge(paper) for paper in state["deduped_papers"]]}
+        judge_results: list[JudgeResult] = []
+        for paper in state["deduped_papers"]:
+            try:
+                result = judge.judge(query=state["user_query"], paper=paper)
+            except Exception as exc:
+                novelty_score = ScoreUtils.calculate_novelty_score(paper)
+                embedding_relevance_score = ScoreUtils.calculate_embedding_relevance_score(
+                    query=state["user_query"],
+                    paper=paper,
+                )
+                error_summary = _sanitize_judge_error(str(exc))
+                result = JudgeResult(
+                    decision="uncertain",
+                    reason=f"judge failed: {type(exc).__name__}: {error_summary}",
+                    llm_relevance_score=0.0,
+                    embedding_relevance_score=embedding_relevance_score,
+                    quality_score=0.0,
+                    novelty_score=novelty_score,
+                    final_score=ScoreUtils.calculate_final_score(
+                        llm_relevance_score=0.0,
+                        embedding_relevance_score=embedding_relevance_score,
+                        quality_score=0.0,
+                        novelty_score=novelty_score,
+                    ),
+                    tags=["judge_failed"],
+                )
+            judge_results.append(result)
+        return {
+            "judge_results": judge_results
+        }
 
     def rank_papers(state: PaperDiscoveryState) -> dict:
         ranked_candidates = [
@@ -68,7 +101,10 @@ def paper_select_node(state: PaperSelectState) -> PaperSelectState:
 
     # 2. Judge
     judge = LLMJudge()
-    judge_results = [judge.judge(paper) for paper in new_papers]
+    judge_results = [
+        judge.judge(query=state.get("user_query", ""), paper=paper)
+        for paper in new_papers
+    ]
     
 
     # 3. 排序（可选）
@@ -78,3 +114,12 @@ def paper_select_node(state: PaperSelectState) -> PaperSelectState:
     state["judge_results"] = sorted_results
 
     return state
+
+
+def _sanitize_judge_error(error_message: str) -> str:
+    sanitized = error_message
+    for env_name in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "PAPER_JUDGE_MODEL", "DEEPSEEK_BASE_URL"):
+        env_value = os.getenv(env_name)
+        if env_value:
+            sanitized = sanitized.replace(env_value, f"<redacted:{env_name.lower()}>")
+    return sanitized.strip() or "unknown error"
