@@ -29,6 +29,7 @@
           <span>DOI: {{ candidate.doi || "n/a" }}</span>
           <span>Venue: {{ candidate.venue || "n/a" }}</span>
           <span>Authors: {{ formatAuthors(candidate.authors) }}</span>
+          <span>score: {{ formatSavedScore(candidate) }}</span>
         </div>
 
         <div class="lifecycle-actions">
@@ -108,6 +109,11 @@ const emit = defineEmits(["accept", "upload", "embed", "refresh", "select-file"]
 
 function formatAuthors(authors) {
   return Array.isArray(authors) && authors.length ? authors.join(", ") : "n/a";
+}
+
+function formatSavedScore(candidate) {
+  const finalScore = candidate?.judgement?.scores?.final_score;
+  return typeof finalScore === "number" ? finalScore.toFixed(3) : "score unavailable";
 }
 
 function isBusy(paperId) {

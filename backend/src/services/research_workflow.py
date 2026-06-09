@@ -57,7 +57,7 @@ class ResearchWorkflowService:
                         "ranked_candidates": [],
                     }
                 )
-                discovery.candidates = result["ranked_candidates"]
+                discovery.candidates = result["ranked_candidates"][:top_k]
             except Exception as exc:
                 discovery_error = (str(exc), 502)
                 discovery.error = str(exc)

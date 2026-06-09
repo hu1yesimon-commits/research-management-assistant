@@ -52,4 +52,44 @@ describe("DiscoveryPanel", () => {
 
     expect(wrapper.emitted("accept")).toEqual([[candidate]]);
   });
+
+  test("shows candidate count, mock scoring badge, and placeholder scoring copy", () => {
+    const wrapper = mount(DiscoveryPanel, {
+      props: {
+        discovery: {
+          enabled: true,
+          candidates: [
+            {
+              paper: {
+                paper_id: "candidate-3",
+                title: "Mock Candidate",
+              },
+              judgement: {
+                final_score: 0.5,
+                llm_relevance_score: 0.5,
+                tags: ["mock"],
+              },
+            },
+            {
+              paper: {
+                paper_id: "candidate-4",
+                title: "Mock Candidate 2",
+              },
+              judgement: {
+                final_score: 0.5,
+                llm_relevance_score: 0.5,
+                tags: ["mock"],
+              },
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("Showing 2 discovery candidates");
+    expect(wrapper.text()).toContain("mock scoring");
+    expect(wrapper.text()).toContain("Current judge output may be a placeholder");
+    expect(wrapper.text()).toContain("Scores are tied across all returned candidates");
+  });
 });

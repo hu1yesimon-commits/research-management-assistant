@@ -68,6 +68,29 @@ def test_research_workflow_returns_discovery_and_knowledge_when_both_enabled():
     assert response.knowledge.sources[0].paper_id == "k1"
 
 
+def test_research_workflow_limits_discovery_candidates_to_top_k():
+    discovery_graph = FakeDiscoveryGraph(
+        result=[
+            {"paper": {"paper_id": "d1", "title": "Discovery Paper 1"}},
+            {"paper": {"paper_id": "d2", "title": "Discovery Paper 2"}},
+            {"paper": {"paper_id": "d3", "title": "Discovery Paper 3"}},
+            {"paper": {"paper_id": "d4", "title": "Discovery Paper 4"}},
+        ]
+    )
+    knowledge_service = FakeKnowledgeQAService()
+    service = build_service(discovery_graph=discovery_graph, knowledge_service=knowledge_service)
+
+    response = service.query(
+        "lightweight graph reconstruction",
+        include_discovery=True,
+        include_knowledge=False,
+        top_k=3,
+    )
+
+    assert [candidate["paper"]["paper_id"] for candidate in response.discovery.candidates] == ["d1", "d2", "d3"]
+    assert knowledge_service.calls == []
+
+
 def test_research_workflow_only_discovery_enabled_does_not_call_knowledge():
     discovery_graph = FakeDiscoveryGraph()
     knowledge_service = FakeKnowledgeQAService()
@@ -106,6 +129,7 @@ def test_research_workflow_only_knowledge_enabled_does_not_call_discovery():
     assert response.discovery.candidates == []
     assert response.knowledge.enabled is True
     assert response.knowledge.answer == "Knowledge answer"
+    assert knowledge_service.calls == [("lightweight graph reconstruction", 4)]
 
 
 def test_research_workflow_rejects_when_both_sections_disabled():

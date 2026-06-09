@@ -14,6 +14,12 @@
       <strong>Discovery error:</strong> {{ discovery.error }}
     </div>
 
+    <div v-if="discovery.candidates?.length" class="alert alert--warning">
+      <strong>Showing {{ discovery.candidates.length }} discovery candidates.</strong>
+      <span> Current judge output may be a placeholder.</span>
+      <span v-if="hasTiedFinalScores"> Scores are tied across all returned candidates, so this should not be read as meaningful ranking quality.</span>
+    </div>
+
     <ul v-if="discovery.candidates?.length" class="stack-list">
       <li
         v-for="candidate in discovery.candidates"
@@ -32,6 +38,10 @@
           <span>Venue: {{ candidate.paper?.venue || "n/a" }}</span>
           <span>final_score: {{ formatScore(candidate.judgement?.final_score) }}</span>
           <span>relevance: {{ formatScore(candidate.judgement?.llm_relevance_score) }}</span>
+        </div>
+
+        <div v-if="hasMockScoring(candidate)" class="lifecycle-actions">
+          <span class="badge badge--muted">mock scoring</span>
         </div>
 
         <div class="lifecycle-actions">
@@ -63,6 +73,8 @@
 </template>
 
 <script setup>
+import { computed } from "vue";
+
 const props = defineProps({
   discovery: {
     type: Object,
@@ -75,6 +87,16 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["accept"]);
+
+const hasTiedFinalScores = computed(() => {
+  const scores = props.discovery.candidates
+    ?.map((candidate) => candidate?.judgement?.final_score)
+    .filter((score) => typeof score === "number");
+  if (!scores || scores.length < 2) {
+    return false;
+  }
+  return new Set(scores).size === 1;
+});
 
 function getCandidateKey(candidate) {
   return candidate.paper?.paper_id || candidate.paper?.title || JSON.stringify(candidate);
@@ -90,5 +112,9 @@ function formatScore(value) {
 
 function isBusy(paperId) {
   return Boolean(paperId && props.actionStates[paperId]?.loading);
+}
+
+function hasMockScoring(candidate) {
+  return Array.isArray(candidate?.judgement?.tags) && candidate.judgement.tags.includes("mock");
 }
 </script>
