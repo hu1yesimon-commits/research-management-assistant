@@ -205,4 +205,7 @@ class IdeaRecommendationService:
             experiment_log.goal,
             " ".join(experiment_log.tried_methods),
         ]
+        memory_context = self.store.build_memory_context()
+        if memory_context.strip():
+            parts.append(memory_context)
         return " ".join(part.strip() for part in parts if part and part.strip())

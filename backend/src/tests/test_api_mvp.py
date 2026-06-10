@@ -561,6 +561,114 @@ def test_candidates_endpoint_returns_empty_list(tmp_path):
     app.dependency_overrides.clear()
 
 
+def test_memory_candidate_refresh_list_accept_and_semantic_list(tmp_path):
+    test_db = tmp_path / "api-memory.sqlite3"
+    store = get_memory_store(str(test_db))
+    for _ in range(3):
+        store.add_experiment_log_entry(
+            {
+                "task": "defect classification",
+                "model": "1D-CNN",
+                "dataset": "bearing fault dataset",
+                "metric_problem": "minority PRAUC is low",
+                "tried_methods": ["focal loss"],
+                "observation": "recall improves but precision collapses",
+                "goal": "improve PRAUC without making model too heavy",
+                "tags": ["lightweight"],
+            }
+        )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    client = TestClient(app)
+
+    refresh = client.post("/memory/candidates/refresh")
+    assert refresh.status_code == 200
+    assert refresh.json()
+
+    candidates = client.get("/memory/candidates")
+    assert candidates.status_code == 200
+    candidate_id = candidates.json()[0]["id"]
+
+    accepted = client.post(f"/memory/candidates/{candidate_id}/accept")
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "confirmed"
+
+    semantic = client.get("/memory/semantic")
+    assert semantic.status_code == 200
+    assert semantic.json()
+
+    app.dependency_overrides.clear()
+
+
+def test_memory_candidate_reject_does_not_create_semantic_memory(tmp_path):
+    test_db = tmp_path / "api-memory-reject.sqlite3"
+    store = get_memory_store(str(test_db))
+    candidate_id = store.upsert_memory_candidate(
+        {
+            "candidate_type": "semantic_proposal",
+            "category": "experiment_target",
+            "subject": "defect classification",
+            "predicate": "uses_object",
+            "object": "focal loss",
+            "summary": "defect classification repeatedly uses focal loss",
+            "source_log_ids": [1, 2, 3],
+            "evidence_count": 3,
+            "score": 0.8,
+            "status": "pending",
+        }
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    client = TestClient(app)
+
+    rejected = client.post(f"/memory/candidates/{candidate_id}/reject")
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+
+    semantic = client.get("/memory/semantic")
+    assert semantic.status_code == 200
+    assert semantic.json() == []
+
+    app.dependency_overrides.clear()
+
+
+def test_memory_semantic_archive_hides_entry_from_default_list(tmp_path):
+    test_db = tmp_path / "api-memory-archive.sqlite3"
+    store = get_memory_store(str(test_db))
+    candidate_id = store.upsert_memory_candidate(
+        {
+            "candidate_type": "semantic_proposal",
+            "category": "user_preference",
+            "subject": "user",
+            "predicate": "prefers",
+            "object": "lightweight",
+            "summary": "User repeatedly prefers lightweight approaches.",
+            "source_log_ids": [1, 2, 3],
+            "evidence_count": 3,
+            "score": 0.8,
+            "status": "pending",
+        }
+    )
+    semantic_id = store.upsert_semantic_memory_from_candidate(store.get_memory_candidate(candidate_id))
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    client = TestClient(app)
+
+    archived = client.post(f"/memory/semantic/{semantic_id}/archive")
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "archived"
+
+    semantic = client.get("/memory/semantic")
+    assert semantic.status_code == 200
+    assert semantic.json() == []
+
+    archived_list = client.get("/memory/semantic?status=archived")
+    assert archived_list.status_code == 200
+    assert archived_list.json()[0]["id"] == semantic_id
+
+    app.dependency_overrides.clear()
+
+
 def test_search_returns_candidates_without_persisting_to_sqlite(tmp_path):
     test_db = tmp_path / "api.sqlite3"
     store = get_memory_store(str(test_db))
@@ -594,8 +702,22 @@ def test_search_returns_candidates_without_persisting_to_sqlite(tmp_path):
 def test_advanced_search_uses_deterministic_memory_context_rewriting(tmp_path):
     test_db = tmp_path / "api-advanced.sqlite3"
     store = get_memory_store(str(test_db))
-    store.add_experiment_log("model is too heavy", tags=["block"])
-    store.add_experiment_log("improve interpretability", tags=["idea"])
+    store.add_experiment_log(
+        "legacy model is too heavy and needs better interpretability",
+        tags=["legacy"],
+    )
+    store.add_experiment_log_entry(
+        {
+            "task": "graph reconstruction",
+            "model": "compact GNN",
+            "dataset": "defect graph benchmark",
+            "metric_problem": "latency is too high",
+            "tried_methods": ["pruning"],
+            "observation": "need better interpretability while keeping the model light",
+            "goal": "find lightweight interpretable graph reconstruction methods",
+            "tags": ["lightweight", "interpretability"],
+        }
+    )
 
     app.dependency_overrides[get_memory_store] = lambda: store
     app.dependency_overrides[get_paper_discovery_graph] = lambda: build_paper_discovery_graph(

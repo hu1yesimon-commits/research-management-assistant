@@ -155,6 +155,44 @@ def test_idea_recommendation_service_can_return_no_source_fallback_without_savin
     assert store.list_experiment_log_entries() == []
 
 
+def test_idea_service_query_includes_confirmed_semantic_memory(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.add_experiment_log("legacy lightweight note should not be required", tags=["legacy"])
+    candidate_id = store.upsert_memory_candidate(
+        {
+            "candidate_type": "semantic_proposal",
+            "category": "user_preference",
+            "subject": "user",
+            "predicate": "prefers",
+            "object": "lightweight",
+            "summary": "User repeatedly prefers lightweight approaches.",
+            "source_log_ids": [1, 2, 3],
+            "evidence_count": 3,
+            "score": 0.8,
+            "status": "pending",
+        }
+    )
+    store.upsert_semantic_memory_from_candidate(store.get_memory_candidate(candidate_id))
+    service = build_recommendation_service(store, FakeVectorStoreService())
+
+    query = service.build_query(
+        ExperimentLogRequest(
+            task="defect classification",
+            model="1D-CNN",
+            dataset="bearing fault dataset",
+            metric_problem="minority PRAUC is low",
+            tried_methods=["focal loss"],
+            observation="recall improves but precision collapses",
+            goal="improve PRAUC",
+            tags=[],
+        )
+    )
+
+    assert "lightweight" in query
+    assert "legacy lightweight note should not be required" not in query
+
+
 def test_idea_recommendation_service_continues_when_discovery_fails(tmp_path):
     class FailingDiscoveryGraph:
         def invoke(self, payload):

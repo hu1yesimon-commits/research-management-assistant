@@ -65,6 +65,36 @@ def test_initialize_creates_structured_experiment_log_entries_table(tmp_path):
     assert "experiment_log_entries" in {row[0] for row in rows}
 
 
+def test_initialize_creates_memory_candidates_table(tmp_path):
+    db_path = tmp_path / "memory.sqlite3"
+    store = MemoryStore(str(db_path))
+
+    store.initialize()
+
+    connection = sqlite3.connect(db_path)
+    rows = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+    ).fetchall()
+    connection.close()
+
+    assert "memory_candidates" in {row[0] for row in rows}
+
+
+def test_initialize_creates_semantic_memory_table(tmp_path):
+    db_path = tmp_path / "memory.sqlite3"
+    store = MemoryStore(str(db_path))
+
+    store.initialize()
+
+    connection = sqlite3.connect(db_path)
+    rows = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+    ).fetchall()
+    connection.close()
+
+    assert "semantic_memory" in {row[0] for row in rows}
+
+
 def test_save_candidate_paper_can_be_listed(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
@@ -145,16 +175,157 @@ def test_structured_experiment_logs_are_separate_from_legacy_logs(tmp_path):
     assert store.list_experiment_log_entries()[0]["task"] == "defect classification"
 
 
-def test_build_memory_context_joins_recent_logs(tmp_path):
+def make_memory_candidate(**overrides):
+    candidate = {
+        "candidate_type": "semantic_proposal",
+        "category": "experiment_target",
+        "subject": "defect classification",
+        "predicate": "uses_object",
+        "object": "focal loss",
+        "summary": "defect classification repeatedly uses focal loss",
+        "source_log_ids": [1, 2, 3],
+        "evidence_count": 3,
+        "score": 0.8,
+        "status": "pending",
+    }
+    candidate.update(overrides)
+    return candidate
+
+
+def test_memory_candidate_can_be_inserted_listed_and_round_trips_source_ids(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
-    store.add_experiment_log("model is too heavy", tags=["block"])
-    store.add_experiment_log("need better interpretability", tags=["idea"])
+
+    candidate_id = store.upsert_memory_candidate(make_memory_candidate())
+
+    candidates = store.list_memory_candidates()
+
+    assert candidate_id > 0
+    assert len(candidates) == 1
+    assert candidates[0]["id"] == candidate_id
+    assert candidates[0]["object"] == "focal loss"
+    assert candidates[0]["source_log_ids"] == [1, 2, 3]
+
+
+def test_memory_candidate_upsert_updates_existing_stable_key(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+
+    first_id = store.upsert_memory_candidate(make_memory_candidate(source_log_ids=[1, 2, 3], score=0.6))
+    second_id = store.upsert_memory_candidate(make_memory_candidate(source_log_ids=[1, 2, 3, 4], score=0.9))
+
+    candidates = store.list_memory_candidates()
+
+    assert second_id == first_id
+    assert len(candidates) == 1
+    assert candidates[0]["source_log_ids"] == [1, 2, 3, 4]
+    assert candidates[0]["evidence_count"] == 4
+    assert candidates[0]["score"] == 0.9
+
+
+def test_rejected_memory_candidate_disappears_from_default_pending_list(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    candidate_id = store.upsert_memory_candidate(make_memory_candidate())
+
+    rejected = store.update_memory_candidate_status(candidate_id, "rejected")
+
+    assert rejected["status"] == "rejected"
+    assert rejected["reviewed_at"]
+    assert store.list_memory_candidates() == []
+    assert store.list_memory_candidates(status="rejected")[0]["id"] == candidate_id
+
+
+def test_semantic_memory_can_be_inserted_from_candidate_and_archived(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    candidate_id = store.upsert_memory_candidate(make_memory_candidate())
+    candidate = store.get_memory_candidate(candidate_id)
+
+    semantic_id = store.upsert_semantic_memory_from_candidate(candidate)
+    semantic = store.get_semantic_memory(semantic_id)
+
+    assert semantic["status"] == "confirmed"
+    assert semantic["supporting_log_ids"] == [1, 2, 3]
+    assert store.list_semantic_memory()[0]["id"] == semantic_id
+
+    archived = store.archive_semantic_memory(semantic_id)
+
+    assert archived["status"] == "archived"
+    assert store.list_semantic_memory() == []
+    assert store.list_semantic_memory(status="archived")[0]["id"] == semantic_id
+
+
+def test_build_memory_context_includes_confirmed_semantic_before_recent_logs(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    candidate_id = store.upsert_memory_candidate(
+        make_memory_candidate(
+            category="user_preference",
+            subject="user",
+            predicate="prefers",
+            object="lightweight",
+            summary="User repeatedly prefers lightweight approaches.",
+        )
+    )
+    store.upsert_semantic_memory_from_candidate(store.get_memory_candidate(candidate_id))
+    store.add_experiment_log_entry(
+        {
+            "task": "graph reconstruction",
+            "model": "GNN",
+            "dataset": "citation graph",
+            "metric_problem": "interpretability is weak",
+            "tried_methods": ["modular loss"],
+            "observation": "loss improves stability",
+            "goal": "keep the model interpretable",
+            "tags": ["interpretability"],
+        }
+    )
 
     context = store.build_memory_context()
 
-    assert "idea: need better interpretability" in context
-    assert "block: model is too heavy" in context
+    semantic_index = context.index("Confirmed semantic memory")
+    episodic_index = context.index("Recent episodic memory")
+    assert semantic_index < episodic_index
+    assert "user prefers lightweight" in context
+    assert "graph reconstruction" in context
+
+
+def test_build_memory_context_uses_recent_three_structured_logs_not_legacy_logs(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.add_experiment_log("legacy note should not enter rewrite", tags=["legacy"])
+
+    for index in range(4):
+        store.add_experiment_log_entry(
+            {
+                "task": f"task-{index}",
+                "model": f"model-{index}",
+                "dataset": f"dataset-{index}",
+                "metric_problem": f"metric problem {index}",
+                "tried_methods": [f"method-{index}"],
+                "observation": f"observation {index}",
+                "goal": f"goal {index}",
+                "tags": [f"tag-{index}"],
+            }
+        )
+
+    context = store.build_memory_context()
+
+    assert "legacy note should not enter rewrite" not in context
+    assert "Confirmed semantic memory:" in context
+    assert "Recent episodic memory:" in context
+    assert "task=task-3" in context
+    assert "model=model-3" in context
+    assert "dataset=dataset-3" in context
+    assert "metric_problem=metric problem 3" in context
+    assert "tried_methods=method-3" in context
+    assert "observation=observation 3" in context
+    assert "goal=goal 3" in context
+    assert "tags=tag-3" in context
+    assert "task-2" in context
+    assert "task-1" in context
+    assert "task-0" not in context
 
 
 def test_list_known_dois_only_returns_uploaded_chunked_and_embedded(tmp_path):

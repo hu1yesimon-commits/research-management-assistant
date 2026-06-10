@@ -39,6 +39,18 @@
   写入结构化实验日志，供 Idea Assistant MVP 使用
 - `GET /experiments/logs`
   读取结构化实验日志
+- `GET /memory/candidates`
+  列出待 review 的长期记忆候选，默认只返回 `pending`
+- `POST /memory/candidates/refresh`
+  基于结构化实验日志的 deterministic 规则刷新 `semantic_proposal` 候选；不会直接写入 confirmed memory
+- `POST /memory/candidates/{candidate_id}/accept`
+  用户确认候选后写入 `semantic_memory`，状态为 `confirmed`
+- `POST /memory/candidates/{candidate_id}/reject`
+  用户拒绝候选，候选标记为 `rejected`，不会写入 `semantic_memory`
+- `GET /memory/semantic`
+  列出 confirmed semantic memory，支持按 status/category/predicate 过滤
+- `POST /memory/semantic/{memory_id}/archive`
+  用户显式归档一条 semantic memory；系统不会仅凭时间自动归档
 - `GET /memory/summary`
   返回 `candidate_count`、`known_dois`、`recent_logs`
 - `POST /knowledge/search`
@@ -61,6 +73,8 @@
 - 更新 paper 状态
 - 保存和查询 legacy/simple `experiment_logs`
 - 保存和查询结构化 `experiment_log_entries`
+- 保存、查询、review `memory_candidates`
+- 保存、查询、归档 `semantic_memory`
 - 查询 known DOI
 - 保存、查询、删除 `knowledge_chunks`
 
@@ -70,7 +84,33 @@
 - `paper_judgements`
 - `experiment_logs`
 - `experiment_log_entries`
+- `memory_candidates`
+- `semantic_memory`
 - `knowledge_chunks`
+
+## Memory System MVP
+
+后端现在有一个 lightweight / deterministic 的 Memory System MVP：
+
+- `experiment_log_entries` 是 episodic memory 主证据层。
+- `memory_candidates` 是系统自动提议但需要用户确认的 review buffer。
+- `semantic_memory` 是用户确认后的长期事实层，默认只有 `confirmed` 进入使用路径。
+- `MemoryStore.build_memory_context()` 组装 `confirmed semantic memory + 最近 3 条 structured experiment logs`。
+- `/search` advanced query rewrite 通过 graph node 读取这个 `memory_context`。
+- `/ideas/recommend` 的 retrieval query 会附加 compact memory context，但仍以当前新提交的 structured log 为最强上下文。
+
+当前 candidate extraction 是 deterministic/offline：
+
+- object 会做小写、去首尾空格、连字符/空格归一、多空格压缩。
+- 同一 `category + subject + predicate + normalized object` 全局累计出现 3 次后，才生成 `semantic_proposal`。
+- `refresh` 只生成或更新 pending candidate，不会直接创建 confirmed semantic memory。
+
+当前 stale/conflict 边界：
+
+- stale/conflict 在 MVP 中是 review-gated contract，不是自动事实修改器。
+- confirmed semantic memory 不会因为时间流逝或一次 refresh 自动变成 archived。
+- 归档必须通过 `POST /memory/semantic/{memory_id}/archive` 显式触发。
+- 当前没有把 memory 写入 Chroma，也没有做 graph/vector memory retrieval。
 
 ## Idea Assistant MVP
 
@@ -172,7 +212,7 @@ Future manual entry 预留语义：
 
 当前 Advanced-lite placeholder 规则：
 
-- 从 experiment logs 构造 `memory_context`
+- 从 `confirmed semantic memory + 最近 3 条 structured experiment logs` 构造 `memory_context`
 - 如果上下文包含 `light` / `heavy` / `轻量`，追加 `lightweight`
 - 如果上下文包含 `interpret` / `可解释`，追加 `interpretability`
 - 如果上下文包含 `module` / `模块`，追加 `modular architecture`
@@ -363,4 +403,4 @@ Chroma 运行说明：
 - `/search` 当前还没有与 Chroma retrieval 联动，也没有走向量检索
 - `PaperSearchService` 真实路径会访问外部源，受网络和第三方接口状态影响
 - `memory/summary` 目前是组合查询，不是单独优化过的 summary read model
-- Advanced-lite 目前只消费 experiment logs，不读取历史对话、论文摘要或知识库
+- Advanced-lite 目前只消费 confirmed semantic memory 和最近 3 条 structured experiment logs，不读取历史对话、论文摘要或知识库

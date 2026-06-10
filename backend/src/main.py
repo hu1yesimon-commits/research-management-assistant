@@ -12,6 +12,8 @@ from services.embedding_service import BgeM3EmbeddingService, EmbeddingService, 
 from services.idea_service import DeterministicIdeaGenerator, IdeaGenerator, IdeaRecommendationService, IdeaServiceError
 from services.knowledge_base import KnowledgeBase
 from services.LlmPaperSelect import LLMJudge
+from services.memory_extractor import MemoryExtractor
+from services.memory_service import MemoryService, MemoryServiceError
 from services.memory_store import MemoryStore
 from services.qa_service import KnowledgeQAService, QAServiceError
 from services.research_workflow import ResearchWorkflowError, ResearchWorkflowService
@@ -25,9 +27,11 @@ from services.schemas import (
     KnowledgeAnswerRequest,
     KnowledgeSearchRequest,
     LogRequest,
+    MemoryCandidate,
     PaperStatus,
     ResearchQueryRequest,
     SearchRequest,
+    SemanticMemoryEntry,
 )
 from services.vector_store import ChromaVectorStoreService, FakeVectorStoreService, VectorStoreService
 
@@ -82,6 +86,10 @@ def get_memory_store(database_path: str | None = None) -> MemoryStore:
     store = MemoryStore(database_path or config.database_path)
     store.initialize()
     return store
+
+
+def get_memory_service(store: MemoryStore = Depends(get_memory_store)) -> MemoryService:
+    return MemoryService(store=store, extractor=MemoryExtractor())
 
 
 def get_paper_judge() -> LLMJudge:
@@ -407,6 +415,72 @@ def recommend_ideas(
             idea_count=request.idea_count,
         )
     except IdeaServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@app.get("/memory/candidates", response_model=list[MemoryCandidate])
+def list_memory_candidates(
+    status: str = "pending",
+    candidate_type: str | None = None,
+    category: str | None = None,
+    store: MemoryStore = Depends(get_memory_store),
+):
+    return store.list_memory_candidates(
+        status=status,
+        candidate_type=candidate_type,
+        category=category,
+    )
+
+
+@app.post("/memory/candidates/refresh", response_model=list[MemoryCandidate])
+def refresh_memory_candidates(service: MemoryService = Depends(get_memory_service)):
+    return service.refresh_candidates()
+
+
+@app.post("/memory/candidates/{candidate_id}/accept", response_model=SemanticMemoryEntry)
+def accept_memory_candidate(
+    candidate_id: int,
+    service: MemoryService = Depends(get_memory_service),
+):
+    try:
+        return service.accept_candidate(candidate_id)
+    except MemoryServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@app.post("/memory/candidates/{candidate_id}/reject", response_model=MemoryCandidate)
+def reject_memory_candidate(
+    candidate_id: int,
+    service: MemoryService = Depends(get_memory_service),
+):
+    try:
+        return service.reject_candidate(candidate_id)
+    except MemoryServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@app.get("/memory/semantic", response_model=list[SemanticMemoryEntry])
+def list_semantic_memory(
+    status: str = "confirmed",
+    category: str | None = None,
+    predicate: str | None = None,
+    store: MemoryStore = Depends(get_memory_store),
+):
+    return store.list_semantic_memory(
+        status=status,
+        category=category,
+        predicate=predicate,
+    )
+
+
+@app.post("/memory/semantic/{memory_id}/archive", response_model=SemanticMemoryEntry)
+def archive_semantic_memory(
+    memory_id: int,
+    service: MemoryService = Depends(get_memory_service),
+):
+    try:
+        return service.archive_semantic_memory(memory_id)
+    except MemoryServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 

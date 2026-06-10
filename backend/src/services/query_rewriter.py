@@ -10,9 +10,9 @@ class QueryRewriter:
 
     当前还有几个你需要知道的限制：
         advanced 现在仍是规则改写，不是真正智能体。
-            memory_context 当前只来自 experiment logs，还没有对话历史、已读论文摘要、知识库相似案例。
+            memory_context 当前来自 confirmed semantic memory section 和最近 structured experiment logs。
             rewritten queries 可能产生多次外部检索；未来真实调用 arXiv/OpenAlex 时要考虑限速和去重。
-            MemoryStore.build_memory_context() 当前按最近 logs 拼文本，够 MVP，但还不是长期记忆摘要器。
+            MemoryStore.build_memory_context() 当前不读取 legacy /logs，也不保存聊天历史。
 
 
     """

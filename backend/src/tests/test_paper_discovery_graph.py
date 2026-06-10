@@ -87,8 +87,22 @@ def test_basic_paper_discovery_graph_returns_ranked_candidates_without_persistin
 def test_advanced_graph_uses_memory_context_for_rewritten_queries(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
-    store.add_experiment_log("model is too heavy", tags=["block"])
-    store.add_experiment_log("need better interpretability", tags=["idea"])
+    store.add_experiment_log(
+        "legacy model is too heavy and needs better interpretability",
+        tags=["legacy"],
+    )
+    store.add_experiment_log_entry(
+        {
+            "task": "graph reconstruction",
+            "model": "compact GNN",
+            "dataset": "defect graph benchmark",
+            "metric_problem": "latency is too high",
+            "tried_methods": ["pruning"],
+            "observation": "need better interpretability while keeping the model light",
+            "goal": "find lightweight interpretable graph reconstruction methods",
+            "tags": ["lightweight", "interpretability"],
+        }
+    )
 
     graph = build_paper_discovery_graph(
         search_service=FakeSearchService(),
@@ -111,7 +125,9 @@ def test_advanced_graph_uses_memory_context_for_rewritten_queries(tmp_path):
         }
     )
 
-    assert "block: model is too heavy" in result["memory_context"]
+    assert "legacy model is too heavy" not in result["memory_context"]
+    assert "task=graph reconstruction" in result["memory_context"]
+    assert "observation=need better interpretability while keeping the model light" in result["memory_context"]
     assert "graph reconstruction lightweight" in result["rewritten_queries"]
     assert "graph reconstruction interpretability" in result["rewritten_queries"]
 

@@ -76,6 +76,73 @@ class ExperimentLogCreateResponse(BaseModel):
     created_at: str
 
 
+class MemoryCategory(str, Enum):
+    research_topic = "research_topic"
+    experiment_target = "experiment_target"
+    result_trend = "result_trend"
+    recurring_block = "recurring_block"
+    user_preference = "user_preference"
+
+
+class MemoryPredicate(str, Enum):
+    focuses_on = "focuses_on"
+    uses_object = "uses_object"
+    shows_trend = "shows_trend"
+    blocked_by = "blocked_by"
+    prefers = "prefers"
+    avoids = "avoids"
+
+
+class MemoryCandidateType(str, Enum):
+    semantic_proposal = "semantic_proposal"
+    stale_proposal = "stale_proposal"
+    conflict_proposal = "conflict_proposal"
+
+
+class MemoryCandidateStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+    expired = "expired"
+
+
+class SemanticMemoryStatus(str, Enum):
+    confirmed = "confirmed"
+    archived = "archived"
+
+
+class MemoryCandidate(BaseModel):
+    id: int
+    candidate_type: MemoryCandidateType
+    category: MemoryCategory
+    subject: str
+    predicate: MemoryPredicate
+    object: str
+    summary: str
+    source_log_ids: list[int] = Field(default_factory=list)
+    evidence_count: int
+    score: float = Field(ge=0, le=1)
+    status: MemoryCandidateStatus
+    created_at: str
+    reviewed_at: str | None = None
+
+
+class SemanticMemoryEntry(BaseModel):
+    id: int
+    category: MemoryCategory
+    subject: str
+    predicate: MemoryPredicate
+    object: str
+    summary: str
+    confidence: float = Field(ge=0, le=1)
+    support_count: int
+    supporting_log_ids: list[int] = Field(default_factory=list)
+    status: SemanticMemoryStatus
+    last_confirmed_at: str
+    created_at: str
+    updated_at: str
+
+
 class KnowledgeSearchRequest(BaseModel):
     query: str
     top_k: int = Field(default=5, ge=1, le=20)

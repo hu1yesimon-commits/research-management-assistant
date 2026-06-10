@@ -91,6 +91,40 @@ class MemoryStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (paper_id) REFERENCES papers(paper_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS memory_candidates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    candidate_type TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    source_log_ids_json TEXT NOT NULL,
+                    evidence_count INTEGER NOT NULL,
+                    score REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    reviewed_at TEXT,
+                    UNIQUE(candidate_type, category, subject, predicate, object)
+                );
+
+                CREATE TABLE IF NOT EXISTS semantic_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    object TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    support_count INTEGER NOT NULL,
+                    supporting_log_ids_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    last_confirmed_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(category, subject, predicate, object)
+                );
                 """
             )
 
@@ -200,13 +234,372 @@ class MemoryStore:
             for row in rows
         ]
 
-    def build_memory_context(self, limit: int = 20) -> str:
-        logs = self.list_experiment_logs(limit=limit)
-        lines = []
-        for log in logs:
-            tags = ",".join(log.get("tags", []))
-            lines.append(f"{tags}: {log['content']}")
+    def build_memory_context(self, limit: int = 3) -> str:
+        semantic_memories = self.list_semantic_memory(status="confirmed")
+        entries = self.list_experiment_log_entries(limit=3)
+        lines = ["Confirmed semantic memory:"]
+
+        for memory in semantic_memories:
+            lines.append(
+                "- "
+                f"[{memory['category']}/{memory['predicate']}] "
+                f"{memory['subject']} {memory['predicate']} {memory['object']}: "
+                f"{memory['summary']}"
+            )
+
+        lines.append("Recent episodic memory:")
+        for entry in entries:
+            tried_methods = ", ".join(entry.get("tried_methods", []))
+            tags = ", ".join(entry.get("tags", []))
+            lines.append(
+                "- "
+                f"task={entry['task']}; "
+                f"model={entry['model']}; "
+                f"dataset={entry['dataset']}; "
+                f"metric_problem={entry['metric_problem']}; "
+                f"tried_methods={tried_methods}; "
+                f"observation={entry['observation']}; "
+                f"goal={entry['goal']}; "
+                f"tags={tags}"
+            )
+
         return "\n".join(lines)
+
+    def upsert_memory_candidate(self, candidate: dict) -> int:
+        now = self._now()
+        source_log_ids = candidate.get("source_log_ids", [])
+        evidence_count = len(source_log_ids) if source_log_ids else candidate.get("evidence_count", 0)
+
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, created_at
+                FROM memory_candidates
+                WHERE candidate_type = ?
+                  AND category = ?
+                  AND subject = ?
+                  AND predicate = ?
+                  AND object = ?
+                """,
+                (
+                    candidate["candidate_type"],
+                    candidate["category"],
+                    candidate["subject"],
+                    candidate["predicate"],
+                    candidate["object"],
+                ),
+            ).fetchone()
+
+            if existing is not None:
+                connection.execute(
+                    """
+                    UPDATE memory_candidates
+                    SET summary = ?,
+                        source_log_ids_json = ?,
+                        evidence_count = ?,
+                        score = ?,
+                        status = ?,
+                        reviewed_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        candidate["summary"],
+                        self._to_json(source_log_ids),
+                        evidence_count,
+                        candidate["score"],
+                        candidate.get("status", "pending"),
+                        candidate.get("reviewed_at"),
+                        existing["id"],
+                    ),
+                )
+                return int(existing["id"])
+
+            cursor = connection.execute(
+                """
+                INSERT INTO memory_candidates (
+                    candidate_type,
+                    category,
+                    subject,
+                    predicate,
+                    object,
+                    summary,
+                    source_log_ids_json,
+                    evidence_count,
+                    score,
+                    status,
+                    created_at,
+                    reviewed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    candidate["candidate_type"],
+                    candidate["category"],
+                    candidate["subject"],
+                    candidate["predicate"],
+                    candidate["object"],
+                    candidate["summary"],
+                    self._to_json(source_log_ids),
+                    evidence_count,
+                    candidate["score"],
+                    candidate.get("status", "pending"),
+                    now,
+                    candidate.get("reviewed_at"),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def list_memory_candidates(
+        self,
+        status: str = "pending",
+        candidate_type: str | None = None,
+        category: str | None = None,
+    ) -> list[dict]:
+        query = """
+            SELECT
+                id,
+                candidate_type,
+                category,
+                subject,
+                predicate,
+                object,
+                summary,
+                source_log_ids_json,
+                evidence_count,
+                score,
+                status,
+                created_at,
+                reviewed_at
+            FROM memory_candidates
+            WHERE status = ?
+        """
+        params: list[object] = [status]
+
+        if candidate_type is not None:
+            query += " AND candidate_type = ?"
+            params.append(candidate_type)
+        if category is not None:
+            query += " AND category = ?"
+            params.append(category)
+
+        query += " ORDER BY evidence_count DESC, score DESC, id ASC"
+
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+
+        return [self._memory_candidate_from_row(row) for row in rows]
+
+    def get_memory_candidate(self, candidate_id: int) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id,
+                    candidate_type,
+                    category,
+                    subject,
+                    predicate,
+                    object,
+                    summary,
+                    source_log_ids_json,
+                    evidence_count,
+                    score,
+                    status,
+                    created_at,
+                    reviewed_at
+                FROM memory_candidates
+                WHERE id = ?
+                """,
+                (candidate_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+        return self._memory_candidate_from_row(row)
+
+    def update_memory_candidate_status(self, candidate_id: int, status: str) -> dict:
+        reviewed_at = self._now() if status in {"accepted", "rejected", "expired"} else None
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE memory_candidates
+                SET status = ?, reviewed_at = ?
+                WHERE id = ?
+                """,
+                (status, reviewed_at, candidate_id),
+            )
+
+        candidate = self.get_memory_candidate(candidate_id)
+        if candidate is None:
+            raise ValueError(f"memory candidate not found: {candidate_id}")
+        return candidate
+
+    def upsert_semantic_memory_from_candidate(self, candidate: dict) -> int:
+        now = self._now()
+        source_log_ids = candidate.get("source_log_ids", [])
+
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT id, created_at
+                FROM semantic_memory
+                WHERE category = ?
+                  AND subject = ?
+                  AND predicate = ?
+                  AND object = ?
+                """,
+                (
+                    candidate["category"],
+                    candidate["subject"],
+                    candidate["predicate"],
+                    candidate["object"],
+                ),
+            ).fetchone()
+
+            if existing is not None:
+                connection.execute(
+                    """
+                    UPDATE semantic_memory
+                    SET summary = ?,
+                        confidence = ?,
+                        support_count = ?,
+                        supporting_log_ids_json = ?,
+                        status = 'confirmed',
+                        last_confirmed_at = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        candidate["summary"],
+                        candidate["score"],
+                        candidate["evidence_count"],
+                        self._to_json(source_log_ids),
+                        now,
+                        now,
+                        existing["id"],
+                    ),
+                )
+                return int(existing["id"])
+
+            cursor = connection.execute(
+                """
+                INSERT INTO semantic_memory (
+                    category,
+                    subject,
+                    predicate,
+                    object,
+                    summary,
+                    confidence,
+                    support_count,
+                    supporting_log_ids_json,
+                    status,
+                    last_confirmed_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    candidate["category"],
+                    candidate["subject"],
+                    candidate["predicate"],
+                    candidate["object"],
+                    candidate["summary"],
+                    candidate["score"],
+                    candidate["evidence_count"],
+                    self._to_json(source_log_ids),
+                    "confirmed",
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def list_semantic_memory(
+        self,
+        status: str = "confirmed",
+        category: str | None = None,
+        predicate: str | None = None,
+    ) -> list[dict]:
+        query = """
+            SELECT
+                id,
+                category,
+                subject,
+                predicate,
+                object,
+                summary,
+                confidence,
+                support_count,
+                supporting_log_ids_json,
+                status,
+                last_confirmed_at,
+                created_at,
+                updated_at
+            FROM semantic_memory
+            WHERE status = ?
+        """
+        params: list[object] = [status]
+
+        if category is not None:
+            query += " AND category = ?"
+            params.append(category)
+        if predicate is not None:
+            query += " AND predicate = ?"
+            params.append(predicate)
+
+        query += " ORDER BY support_count DESC, updated_at DESC, id ASC"
+
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+
+        return [self._semantic_memory_from_row(row) for row in rows]
+
+    def get_semantic_memory(self, memory_id: int) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id,
+                    category,
+                    subject,
+                    predicate,
+                    object,
+                    summary,
+                    confidence,
+                    support_count,
+                    supporting_log_ids_json,
+                    status,
+                    last_confirmed_at,
+                    created_at,
+                    updated_at
+                FROM semantic_memory
+                WHERE id = ?
+                """,
+                (memory_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+        return self._semantic_memory_from_row(row)
+
+    def archive_semantic_memory(self, memory_id: int) -> dict:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE semantic_memory
+                SET status = 'archived', updated_at = ?
+                WHERE id = ?
+                """,
+                (now, memory_id),
+            )
+
+        memory = self.get_semantic_memory(memory_id)
+        if memory is None:
+            raise ValueError(f"semantic memory not found: {memory_id}")
+        return memory
 
     def save_candidate_paper(
         self,
@@ -597,6 +990,40 @@ class MemoryStore:
                 """,
                 (paper_id,),
             ).fetchone()
+
+    def _memory_candidate_from_row(self, row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "candidate_type": row["candidate_type"],
+            "category": row["category"],
+            "subject": row["subject"],
+            "predicate": row["predicate"],
+            "object": row["object"],
+            "summary": row["summary"],
+            "source_log_ids": self._from_json(row["source_log_ids_json"]),
+            "evidence_count": row["evidence_count"],
+            "score": row["score"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "reviewed_at": row["reviewed_at"],
+        }
+
+    def _semantic_memory_from_row(self, row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "category": row["category"],
+            "subject": row["subject"],
+            "predicate": row["predicate"],
+            "object": row["object"],
+            "summary": row["summary"],
+            "confidence": row["confidence"],
+            "support_count": row["support_count"],
+            "supporting_log_ids": self._from_json(row["supporting_log_ids_json"]),
+            "status": row["status"],
+            "last_confirmed_at": row["last_confirmed_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
     @staticmethod
     def _normalize_doi(doi: str | None) -> str | None:
