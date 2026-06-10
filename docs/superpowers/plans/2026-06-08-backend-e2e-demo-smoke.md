@@ -4,31 +4,42 @@
 
 ## Goal
 
-Provide one place to demo and smoke-check the current backend MVP end to end without adding new business logic.
+Provide one place to demo and smoke-check the current MVP end to end without adding new business logic.
 
-This guide covers three paths:
+Current implemented demo surfaces include:
+
+- Research Workbench frontend
+- Idea Assistant MVP
+- Memory System MVP
+
+This guide covers four paths:
 
 - `A. Offline deterministic path`
-- `B. Real local ingestion path`
-- `C. Real LLM answer provider manual smoke`
+- `B. Research Workbench interview path`
+- `C. Real local ingestion path`
+- `D. Real LLM answer provider manual smoke`
 
-All paths are backend-only:
+Default paths remain local/offline:
 
-- no frontend
 - no streaming or SSE
 - no multi-turn chat
 - default tests still do not require real LLM answer generation
+- default smoke does not require BGE-M3, Chroma, DeepSeek/OpenAI, arXiv/OpenAlex, or network access
 
 ## Key Boundaries
 
 Current system boundaries that matter during demos:
 
+- Research Workbench is implemented as a Vue 3 + Vite MVP and talks to the FastAPI backend
 - `/search` paper discovery and knowledge retrieval are still two different chains
 - `/research/query` is the current best candidate for a frontend-facing unified entrypoint because it can return discovery and knowledge in one response
 - `/research/query` returns two sections: `discovery` and `knowledge`
 - discovery candidates are not grounded answer sources; they must not be interpreted as `knowledge.sources`
 - `/knowledge/search` and `/knowledge/answer` operate on already embedded knowledge chunks
 - `/knowledge/answer` defaults to a deterministic grounded answer; real LLM answer generation is optional manual smoke only
+- `/experiments/logs` and `/ideas/recommend` are implemented for the Idea Assistant MVP
+- `/memory/candidates/*` and `/memory/semantic/*` are implemented for the Memory System MVP
+- stale/conflict automatic detection or automatic mutation is future work; current Memory System behavior is review-gated and explicit
 - OpenAlex enrichment is best-effort; missing nested fields should degrade candidate enrichment instead of failing the whole discovery workflow
 - external API HTTP or network failures can still produce partial failures or missing enrichment data
 - retrieval uses `distance`, and smaller `distance` means a more relevant hit
@@ -57,6 +68,10 @@ Use default offline-friendly configuration:
 - paper can move through `uploaded -> chunked -> embedded`
 - retrieval can return embedded chunks through `/knowledge/search`
 - grounded answer can return deterministic answer plus sources through `/knowledge/answer`
+- structured experiment logs can be saved through `/experiments/logs`
+- memory candidates can be refreshed through `/memory/candidates/refresh`
+- Idea Assistant can return deterministic ideas through `/ideas/recommend`
+- Idea Assistant evidence can come from retrieval chunks rather than invented citations
 - API shapes and SQLite-backed state transitions are intact
 
 ### Recommended Demo Sequence
@@ -80,11 +95,22 @@ curl -s http://127.0.0.1:8000/health
 curl -s http://127.0.0.1:8000/memory/summary
 ```
 
-4. Use deterministic API tests as the main smoke:
+4. Run the default offline HTTP smoke:
+
+```bash
+bash backend/scripts/smoke_offline_mvp.sh
+```
+
+This script uses temporary SQLite state plus in-process FastAPI HTTP requests. It does not bind a port, does not write repo runtime data, and does not use real providers or network.
+
+5. Use deterministic API tests as the broader backend smoke:
 
 - `POST /papers/{paper_id}/embed`
 - `POST /knowledge/search`
 - `POST /knowledge/answer`
+- `POST /experiments/logs`
+- `POST /memory/candidates/refresh`
+- `POST /ideas/recommend`
 
 Recommended verification command:
 
@@ -104,6 +130,13 @@ This path covers these endpoints:
 - `POST /research/query`
 - `POST /logs`
 - `GET /logs`
+- `POST /experiments/logs`
+- `GET /experiments/logs`
+- `POST /memory/candidates/refresh`
+- `GET /memory/candidates`
+- `POST /memory/candidates/{candidate_id}/accept`
+- `GET /memory/semantic`
+- `POST /ideas/recommend`
 - `POST /papers/{paper_id}/embed`
 - `POST /knowledge/search`
 - `POST /knowledge/answer`
@@ -112,6 +145,7 @@ This path covers these endpoints:
 
 Automatic smoke:
 
+- `backend/scripts/smoke_offline_mvp.sh`
 - pytest-based API and service tests
 
 Manual steps:
@@ -150,7 +184,52 @@ Expected interpretation:
 - when OpenAlex enrichment is incomplete, candidate papers should still be returned with partial metadata and raw/debug traces where available
 - if an upstream API returns HTTP failures or network errors, the response may still show section-level partial failure instead of complete success
 
-## Path B: Real Local Ingestion Path
+## Path B: Research Workbench Interview Path
+
+### Purpose
+
+Use this path when showing the product surface rather than only backend contracts.
+
+### Start Backend
+
+```bash
+PYTHONPATH=backend/src ./.venv/bin/uvicorn main:app --app-dir backend/src --port 8000
+```
+
+### Start Frontend
+
+```bash
+cd frontend
+npm run dev -- --host 127.0.0.1
+```
+
+### Recommended UI Sequence
+
+1. Open the Research Workbench.
+2. Submit a research query.
+3. Explain that `discovery` and `knowledge` are independent sections from `/research/query`.
+4. Accept one discovery candidate.
+5. Upload a PDF for the saved candidate.
+6. Use `Embed / Advance Status` to move `uploaded -> chunked -> embedded`.
+7. Submit an Idea Assistant structured experiment log.
+8. Explain that Idea Assistant recommendations are deterministic by default and that any `supporting_evidence` comes from retrieval/discovery payloads.
+9. For Memory System MVP, use backend smoke or curl to show `POST /memory/candidates/refresh`, then accept/reject candidate review.
+
+### Frontend Verification
+
+```bash
+cd frontend
+npm test
+npm run build
+```
+
+### Explicit Limitations
+
+- The current Workbench is an engineering MVP, not a production UI.
+- There is no dedicated Memory System review panel yet; memory review is currently backend/API-driven.
+- Browser/dev-server validation can be environment-sensitive in sandboxes; component tests and build are the default automated verification.
+
+## Path C: Real Local Ingestion Path
 
 ### Purpose
 
@@ -181,7 +260,7 @@ Use real local integration settings:
 
 The current real embedding smoke script is:
 
-- [backend/scripts/smoke_embed_bge_chroma.sh](/Users/nuonuohu/Developer/graphReconstruction-phase-2d-v2/backend/scripts/smoke_embed_bge_chroma.sh)
+- [backend/scripts/smoke_embed_bge_chroma.sh](/Users/nuonuohu/Developer/graphReconstruction/backend/scripts/smoke_embed_bge_chroma.sh)
 
 What it already automates:
 
@@ -201,7 +280,7 @@ What it already automates:
 ### Run The Existing Real Embed Smoke
 
 ```bash
-cd /Users/nuonuohu/Developer/graphReconstruction-phase-2d-v2
+cd /Users/nuonuohu/Developer/graphReconstruction
 bash backend/scripts/smoke_embed_bge_chroma.sh
 ```
 
@@ -268,7 +347,7 @@ Manual steps:
 - manually call `/knowledge/search`
 - manually call `/knowledge/answer`
 
-## Path C: Real LLM Answer Provider Manual Smoke
+## Path D: Real LLM Answer Provider Manual Smoke
 
 ### Purpose
 
@@ -386,9 +465,20 @@ This manual smoke has important limits:
 Fast offline backend demo:
 
 1. run pytest
-2. optionally start `uvicorn`
-3. show `POST /knowledge/search`
-4. show `POST /knowledge/answer`
+2. run `backend/scripts/smoke_offline_mvp.sh`
+3. optionally start `uvicorn`
+4. show `POST /knowledge/search`
+5. show `POST /knowledge/answer`
+
+Research Workbench demo:
+
+1. start backend
+2. start frontend
+3. submit query
+4. accept discovery candidate
+5. upload and embed PDF
+6. submit Idea Assistant log
+7. review memory candidates through backend smoke/curl
 
 Real local integration demo:
 
@@ -414,9 +504,10 @@ Even after these demo paths, the backend is still not a full RAG product.
 Still missing:
 
 - `/search` to retrieval handoff
-- unified research workflow across discovery and knowledge retrieval
 - multi-turn QA memory
 - streaming / SSE
+- stale/conflict automatic memory handling
+- Memory System frontend review UI
 
 Still not guaranteed by this smoke:
 

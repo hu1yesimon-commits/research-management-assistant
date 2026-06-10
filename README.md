@@ -1,8 +1,32 @@
 # Research Management MVP
 
-当前仓库已经落地的是一个后端 MVP：`FastAPI + LangGraph + SQLite`，用于论文候选检索、accept 后持久化，以及实验日志记录。
+当前仓库已经进入 feature-freeze / interview-polish 收敛状态。已落地的是一个本地优先的 Research Management Assistant MVP：`FastAPI + LangGraph + SQLite` 后端、Vue 3 + Vite Research Workbench、deterministic Idea Assistant MVP、以及 review-gated Memory System MVP。
 
-本文档只同步已经完成的事实，不把计划中的真实 embedding provider、RAG retrieval、前端工作台写成已完成；`Advanced-lite` 目前也只是 deterministic placeholder，不是真实 LLM / RAG research agent。
+本文档只同步已经完成的事实。默认路径保持 deterministic/offline，不依赖 DeepSeek、OpenAI、BGE-M3、Chroma、arXiv、OpenAlex 或外网；这些真实 provider / 外部源路径都是显式配置后的 optional smoke。`Advanced-lite` 目前是 deterministic query rewrite，不是真实 LLM / RAG research agent。
+
+## Interview Snapshot
+
+Implemented and demo-ready:
+
+- Research Workbench frontend: unified `/research/query` UI, discovery/knowledge split view, saved candidate lifecycle, PDF upload/embed controls, and Idea Assistant panel.
+- Backend MVP endpoints: paper discovery, accept/upload/embed lifecycle, retrieval, grounded answer, unified research query, structured experiment logs, Idea Assistant, and Memory System review APIs.
+- Idea Assistant MVP: structured experiment log in, retrieval-backed evidence lookup, deterministic 3-5 idea options out.
+- Memory System MVP: structured logs as episodic evidence, deterministic `semantic_proposal` candidates, user accept/reject review, confirmed semantic memory, and explicit archive.
+
+Default deterministic boundaries:
+
+- `PAPER_JUDGE_PROVIDER=mock`
+- `EMBEDDING_PROVIDER=fake`
+- `VECTOR_BACKEND=fake`
+- `ANSWER_PROVIDER=deterministic`
+- `IDEA_PROVIDER=deterministic`
+
+Optional real providers:
+
+- `PAPER_JUDGE_PROVIDER=deepseek` for manual paper-judge smoke.
+- `ANSWER_PROVIDER=openai` or `ANSWER_PROVIDER=deepseek` for manual grounded-answer smoke.
+- `EMBEDDING_PROVIDER=bge-m3` plus `VECTOR_BACKEND=chroma` for local real embedding/vector smoke.
+- arXiv/OpenAlex discovery paths are live external integrations and can be affected by network, API, and rate-limit behavior.
 
 ## Current Scope
 
@@ -12,6 +36,8 @@
 - SQLite 持久化在 [backend/src/services/memory_store.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/services/memory_store.py)
 - PDF upload + Phase 2C text extraction/chunking 在 [backend/src/services/knowledge_base.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/services/knowledge_base.py)
 - 基础 graph flow 在 [backend/src/graph/builder.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/graph/builder.py) 和 [backend/src/graph/nodes.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/graph/nodes.py)
+- Vue 3 + Vite Research Workbench 在 [frontend/src/components/ResearchWorkbench.vue](/Users/nuonuohu/Developer/graphReconstruction/frontend/src/components/ResearchWorkbench.vue)
+- Idea Assistant panel 在 [frontend/src/components/IdeaAssistantPanel.vue](/Users/nuonuohu/Developer/graphReconstruction/frontend/src/components/IdeaAssistantPanel.vue)
 - API tests、graph tests、store tests 已覆盖当前 MVP 主路径
 
 ## Implemented Endpoints
@@ -262,6 +288,7 @@ curl -s http://127.0.0.1:8000/memory/summary
   - `POST /papers/{paper_id}/accept`
   - `POST /papers/{paper_id}/upload_pdf`
   - `POST /papers/{paper_id}/embed`
+- Idea Assistant panel 支持提交结构化实验日志并调用 `POST /ideas/recommend`
 
 运行方式：
 
@@ -307,6 +334,38 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest \
   -q
 ```
 
+运行默认离线 smoke：
+
+```bash
+bash backend/scripts/smoke_offline_mvp.sh
+```
+
+该 smoke 使用临时 SQLite 和 in-process FastAPI HTTP requests，覆盖 `GET /health`、`POST /experiments/logs`、`POST /memory/candidates/refresh`、`POST /ideas/recommend`，并额外证明 Idea Assistant 的 `supporting_evidence` 可以来自已 `embedded` 的 retrieval chunk。
+
+## Interview Demo Script
+
+推荐面试演示顺序：
+
+1. 启动后端：
+
+```bash
+PYTHONPATH=backend/src ./.venv/bin/uvicorn main:app --app-dir backend/src --port 8000
+```
+
+2. 启动前端：
+
+```bash
+cd frontend
+npm run dev -- --host 127.0.0.1
+```
+
+3. 打开 Research Workbench，提交一个 query，说明 `/research/query` 把 discovery 和 knowledge 拆成两个独立 section。
+4. 在 discovery 中 accept 一个 candidate，说明 discovery result 默认不入库，只有用户确认后进入 SQLite lifecycle。
+5. 对 saved candidate 上传 PDF，然后调用 embed/advance，说明推荐路径是 `accepted -> uploaded -> chunked -> embedded`。
+6. 用 Idea Assistant 提交 structured experiment log，说明 ideas 默认 deterministic，sources 只能来自 retrieval/discovery 返回对象。
+7. 用后端 smoke 或 curl 演示 memory candidate review：先写入多条 structured logs，再 `POST /memory/candidates/refresh`，然后 accept/reject candidate。
+8. 讲清楚 optional provider 边界：真实 DeepSeek/OpenAI/BGE-M3/Chroma 都是显式配置后的手动 smoke，不属于默认 demo 依赖。
+
 ## Current Limitations
 
 当前明确还没有完成：
@@ -316,6 +375,9 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest \
 - 完整 RAG 查询链路，以及 `/search` 到 retrieval 的联动
 - 生产级前端界面
 - 数据库迁移机制
+- stale/conflict 自动判断和自动处理；当前只保留 review-gated future-work contract
+- Memory 写入 Chroma 或 graph/vector memory retrieval
+- 多轮 chat memory、streaming / SSE、生产级评测闭环
 
 ## Retrieval MVP
 
