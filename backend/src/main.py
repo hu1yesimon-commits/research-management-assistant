@@ -187,6 +187,7 @@ def get_idea_recommendation_service(
     embedding_service: EmbeddingService = Depends(get_embedding_service),
     vector_store_service: VectorStoreService = Depends(get_vector_store_service),
     idea_generator: IdeaGenerator = Depends(get_idea_generator),
+    discovery_graph=Depends(get_paper_discovery_graph),
 ) -> IdeaRecommendationService:
     retrieval_service = KnowledgeRetrievalService(
         store=store,
@@ -197,7 +198,7 @@ def get_idea_recommendation_service(
         store=store,
         retrieval_service=retrieval_service,
         idea_generator=idea_generator,
-        discovery_graph=None,
+        discovery_graph=discovery_graph,
         mode=get_idea_mode(),
     )
 

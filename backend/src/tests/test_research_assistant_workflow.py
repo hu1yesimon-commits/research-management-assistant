@@ -8,6 +8,8 @@ from services.schemas import (
     IdeaRecommendResponse,
     KnowledgeAnswerResponse,
     KnowledgeAnswerSource,
+    KnowledgeSearchResponse,
+    KnowledgeSearchResult,
 )
 
 
@@ -32,6 +34,30 @@ class FakeDiscoveryGraph:
         return {**state, "ranked_candidates": self.result}
 
 
+class FakeRetrievalService:
+    def __init__(self, response: KnowledgeAnswerResponse):
+        self.response = response
+        self.calls: list[tuple[str, int]] = []
+
+    def search(self, query: str, top_k: int = 5) -> KnowledgeSearchResponse:
+        self.calls.append((query, top_k))
+        return KnowledgeSearchResponse(
+            query=query,
+            top_k=top_k,
+            results=[
+                KnowledgeSearchResult(
+                    paper_id=source.paper_id,
+                    title=source.title,
+                    chunk_index=source.chunk_index,
+                    distance=source.distance,
+                    text=source.text,
+                    vector_ref=source.vector_ref,
+                )
+                for source in self.response.sources
+            ],
+        )
+
+
 class FakeKnowledgeQAService:
     def __init__(self, response: KnowledgeAnswerResponse | None = None, error: Exception | None = None):
         self.response = response or KnowledgeAnswerResponse(
@@ -50,10 +76,11 @@ class FakeKnowledgeQAService:
             mode="deterministic",
         )
         self.error = error
-        self.calls: list[tuple[str, int]] = []
+        self.retrieval_service = FakeRetrievalService(self.response)
+        self.answer_calls: list[tuple[str, int]] = []
 
     def answer(self, question: str, top_k: int = 5) -> KnowledgeAnswerResponse:
-        self.calls.append((question, top_k))
+        self.answer_calls.append((question, top_k))
         if self.error is not None:
             raise self.error
         return self.response
@@ -136,7 +163,8 @@ def test_auto_low_coverage_routes_to_basic_explore():
     assert response.route == "basic_explore"
     assert response.discovery.candidates[0]["paper"]["paper_id"] == "d1"
     assert response.knowledge.answer == "No relevant knowledge chunks were found."
-    assert knowledge.calls == [("brand new topic", 3)]
+    assert knowledge.retrieval_service.calls == [("brand new topic", 3)]
+    assert knowledge.answer_calls == [("brand new topic", 3)]
     assert response.next_action is not None
     assert response.next_action.type == "upload_pdf"
 
@@ -157,7 +185,8 @@ def test_auto_high_coverage_routes_to_advanced_ready_without_running_discovery()
     assert response.discovery.enabled is False
     assert response.knowledge.enabled is False
     assert discovery.calls == []
-    assert knowledge.calls == [("graph reconstruction precision", 5)]
+    assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
+    assert knowledge.answer_calls == []
     assert response.next_action is not None
     assert response.next_action.type == "choose_intent"
 
@@ -177,10 +206,11 @@ def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery
     assert response.discovery.error == "discovery offline"
     assert response.knowledge.answer == "Knowledge answer"
     assert response.errors[0].section == "discovery"
-    assert knowledge.calls == [("graph reconstruction precision", 5)]
+    assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
+    assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
 
 
-def test_search_intent_reuses_coverage_knowledge_failure_without_retrying():
+def test_search_intent_calls_answer_once_when_route_consumes_knowledge():
     knowledge = FakeKnowledgeQAService(error=QAServiceError("knowledge offline"))
     service = build_service(
         store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
@@ -194,7 +224,8 @@ def test_search_intent_reuses_coverage_knowledge_failure_without_retrying():
     assert response.knowledge.error == "knowledge offline"
     assert response.errors[0].section == "knowledge"
     assert response.errors[0].message == "knowledge offline"
-    assert knowledge.calls == [("graph reconstruction precision", 5)]
+    assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
+    assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
 
 
 def test_research_intent_requires_experiment_log():
@@ -211,8 +242,10 @@ def test_research_intent_requires_experiment_log():
 
 def test_research_intent_routes_to_idea_service():
     idea_service = FakeIdeaService()
+    knowledge = FakeKnowledgeQAService()
     service = build_service(
         store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        knowledge_service=knowledge,
         idea_service=idea_service,
     )
 
@@ -222,3 +255,4 @@ def test_research_intent_routes_to_idea_service():
     assert response.route == "research_idea"
     assert response.ideas[0].title == "Try calibrated retrieval"
     assert len(idea_service.calls) == 1
+    assert knowledge.answer_calls == []

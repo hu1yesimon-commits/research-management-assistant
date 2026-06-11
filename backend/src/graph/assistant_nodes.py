@@ -3,6 +3,7 @@ from __future__ import annotations
 from services.coverage import calculate_coverage_score
 from services.idea_service import IdeaServiceError
 from services.qa_service import QAServiceError
+from services.retrieval_service import RetrievalServiceError
 from services.schemas import ResearchDiscoverySection, ResearchKnowledgeSection
 
 
@@ -19,14 +20,10 @@ def make_research_assistant_nodes(
         return {"memory_context": store.build_memory_context()}
 
     def assess_query_coverage(state: dict) -> dict:
-        knowledge_response = None
-        knowledge_error = None
-        has_sources = False
         try:
-            knowledge_response = knowledge_qa_service.answer(state["query"], top_k=state["top_k"])
-            has_sources = bool(knowledge_response.sources)
-        except QAServiceError as exc:
-            knowledge_error = exc.detail
+            retrieval_response = knowledge_qa_service.retrieval_service.search(state["query"], top_k=state["top_k"])
+            has_sources = bool(retrieval_response.results)
+        except RetrievalServiceError:
             has_sources = False
         score, reason = calculate_coverage_score(
             query=state["query"],
@@ -38,16 +35,6 @@ def make_research_assistant_nodes(
             "coverage_score": score,
             "route_reason": reason,
         }
-        if knowledge_response is not None:
-            updates["knowledge"] = _knowledge_section(enabled=False, response=knowledge_response).model_dump()
-        if knowledge_error is not None:
-            updates["knowledge"] = ResearchKnowledgeSection(
-                enabled=False,
-                answer=None,
-                sources=[],
-                error=knowledge_error,
-                mode=None,
-            ).model_dump()
         return updates
 
     def route_request(state: dict) -> dict:
