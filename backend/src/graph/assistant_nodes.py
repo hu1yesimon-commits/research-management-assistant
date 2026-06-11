@@ -20,11 +20,13 @@ def make_research_assistant_nodes(
 
     def assess_query_coverage(state: dict) -> dict:
         knowledge_response = None
+        knowledge_error = None
         has_sources = False
         try:
             knowledge_response = knowledge_qa_service.answer(state["query"], top_k=state["top_k"])
             has_sources = bool(knowledge_response.sources)
-        except QAServiceError:
+        except QAServiceError as exc:
+            knowledge_error = exc.detail
             has_sources = False
         score, reason = calculate_coverage_score(
             query=state["query"],
@@ -38,6 +40,14 @@ def make_research_assistant_nodes(
         }
         if knowledge_response is not None:
             updates["knowledge"] = _knowledge_section(enabled=False, response=knowledge_response).model_dump()
+        if knowledge_error is not None:
+            updates["knowledge"] = ResearchKnowledgeSection(
+                enabled=False,
+                answer=None,
+                sources=[],
+                error=knowledge_error,
+                mode=None,
+            ).model_dump()
         return updates
 
     def route_request(state: dict) -> dict:
@@ -230,8 +240,11 @@ def _knowledge_from_state_or_service(
     enabled: bool,
 ) -> tuple[ResearchKnowledgeSection, list[dict]]:
     cached_knowledge = state.get("knowledge")
-    if cached_knowledge and cached_knowledge.get("answer") is not None:
-        return ResearchKnowledgeSection(**{**cached_knowledge, "enabled": enabled}), []
+    if cached_knowledge and (cached_knowledge.get("answer") is not None or cached_knowledge.get("error") is not None):
+        knowledge = ResearchKnowledgeSection(**{**cached_knowledge, "enabled": enabled})
+        if knowledge.error is not None and enabled:
+            return knowledge, [{"section": "knowledge", "message": knowledge.error}]
+        return knowledge, []
     return _run_knowledge(knowledge_qa_service, state, enabled=enabled)
 
 

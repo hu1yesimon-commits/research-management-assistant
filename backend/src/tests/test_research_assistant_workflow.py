@@ -180,6 +180,23 @@ def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery
     assert knowledge.calls == [("graph reconstruction precision", 5)]
 
 
+def test_search_intent_reuses_coverage_knowledge_failure_without_retrying():
+    knowledge = FakeKnowledgeQAService(error=QAServiceError("knowledge offline"))
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        knowledge_service=knowledge,
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="search", top_k=5)
+
+    assert response.route == "advanced_search"
+    assert response.knowledge.enabled is True
+    assert response.knowledge.error == "knowledge offline"
+    assert response.errors[0].section == "knowledge"
+    assert response.errors[0].message == "knowledge offline"
+    assert knowledge.calls == [("graph reconstruction precision", 5)]
+
+
 def test_research_intent_requires_experiment_log():
     service = build_service()
 
