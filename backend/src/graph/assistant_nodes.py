@@ -20,11 +20,13 @@ def make_research_assistant_nodes(
         return {"memory_context": store.build_memory_context()}
 
     def assess_query_coverage(state: dict) -> dict:
+        errors = state["errors"]
         try:
             retrieval_response = knowledge_qa_service.retrieval_service.search(state["query"], top_k=state["top_k"])
             has_sources = bool(retrieval_response.results)
-        except RetrievalServiceError:
+        except RetrievalServiceError as exc:
             has_sources = False
+            errors = errors + [{"section": "coverage", "message": exc.detail}]
         score, reason = calculate_coverage_score(
             query=state["query"],
             semantic_memory_text=_semantic_memory_text(state["memory_context"]),
@@ -34,6 +36,7 @@ def make_research_assistant_nodes(
         updates = {
             "coverage_score": score,
             "route_reason": reason,
+            "errors": errors,
         }
         return updates
 

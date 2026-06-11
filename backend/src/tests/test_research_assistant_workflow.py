@@ -1,4 +1,5 @@
 from services.qa_service import QAServiceError
+from services.retrieval_service import RetrievalServiceError
 from services.research_assistant_workflow import ResearchAssistantWorkflowError, ResearchAssistantWorkflowService
 from services.schemas import (
     ExperimentLogRequest,
@@ -35,12 +36,15 @@ class FakeDiscoveryGraph:
 
 
 class FakeRetrievalService:
-    def __init__(self, response: KnowledgeAnswerResponse):
+    def __init__(self, response: KnowledgeAnswerResponse, error: Exception | None = None):
         self.response = response
+        self.error = error
         self.calls: list[tuple[str, int]] = []
 
     def search(self, query: str, top_k: int = 5) -> KnowledgeSearchResponse:
         self.calls.append((query, top_k))
+        if self.error is not None:
+            raise self.error
         return KnowledgeSearchResponse(
             query=query,
             top_k=top_k,
@@ -59,7 +63,12 @@ class FakeRetrievalService:
 
 
 class FakeKnowledgeQAService:
-    def __init__(self, response: KnowledgeAnswerResponse | None = None, error: Exception | None = None):
+    def __init__(
+        self,
+        response: KnowledgeAnswerResponse | None = None,
+        error: Exception | None = None,
+        retrieval_error: Exception | None = None,
+    ):
         self.response = response or KnowledgeAnswerResponse(
             question="graph reconstruction",
             answer="Knowledge answer",
@@ -76,7 +85,7 @@ class FakeKnowledgeQAService:
             mode="deterministic",
         )
         self.error = error
-        self.retrieval_service = FakeRetrievalService(self.response)
+        self.retrieval_service = FakeRetrievalService(self.response, error=retrieval_error)
         self.answer_calls: list[tuple[str, int]] = []
 
     def answer(self, question: str, top_k: int = 5) -> KnowledgeAnswerResponse:
@@ -224,6 +233,25 @@ def test_search_intent_calls_answer_once_when_route_consumes_knowledge():
     assert response.knowledge.error == "knowledge offline"
     assert response.errors[0].section == "knowledge"
     assert response.errors[0].message == "knowledge offline"
+    assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
+    assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
+
+
+def test_auto_coverage_retrieval_failure_routes_to_basic_explore_with_coverage_error():
+    knowledge = FakeKnowledgeQAService(
+        retrieval_error=RetrievalServiceError("knowledge retrieval failed: vector backend unavailable", status_code=502)
+    )
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory:\nRecent episodic memory:"),
+        knowledge_service=knowledge,
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="auto", top_k=5)
+
+    assert response.mode == "basic"
+    assert response.route == "basic_explore"
+    assert response.errors[0].section == "coverage"
+    assert response.errors[0].message == "knowledge retrieval failed: vector backend unavailable"
     assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
     assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
 

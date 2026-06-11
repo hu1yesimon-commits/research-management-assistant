@@ -5,6 +5,16 @@ from services.schemas import JudgeResult, PaperId, PaperMetadata
 from services.vector_store import FakeVectorStoreService, build_chunk_uid
 
 
+class FailingEmbeddingService:
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        raise ValueError("embedding backend unavailable")
+
+
+class FailingVectorStoreService(FakeVectorStoreService):
+    def query_by_embedding(self, embedding: list[float], top_k: int):
+        raise RuntimeError("vector backend unavailable")
+
+
 def make_paper(paper_id: str, title: str) -> PaperMetadata:
     return PaperMetadata(
         paper_id=paper_id,
@@ -95,5 +105,41 @@ def test_knowledge_retrieval_service_rejects_blank_query(tmp_path):
         service.search("   ", top_k=5)
     except RetrievalServiceError as exc:
         assert exc.status_code == 400
+    else:
+        raise AssertionError("expected RetrievalServiceError")
+
+
+def test_knowledge_retrieval_service_wraps_embedding_failure_as_bad_gateway(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    service = KnowledgeRetrievalService(
+        store=store,
+        embedding_service=FailingEmbeddingService(),
+        vector_store_service=FakeVectorStoreService(),
+    )
+
+    try:
+        service.search("graph reconstruction", top_k=5)
+    except RetrievalServiceError as exc:
+        assert exc.status_code == 502
+        assert exc.detail == "knowledge retrieval failed: embedding backend unavailable"
+    else:
+        raise AssertionError("expected RetrievalServiceError")
+
+
+def test_knowledge_retrieval_service_wraps_vector_failure_as_bad_gateway(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    service = KnowledgeRetrievalService(
+        store=store,
+        embedding_service=FakeEmbeddingService(),
+        vector_store_service=FailingVectorStoreService(),
+    )
+
+    try:
+        service.search("graph reconstruction", top_k=5)
+    except RetrievalServiceError as exc:
+        assert exc.status_code == 502
+        assert exc.detail == "knowledge retrieval failed: vector backend unavailable"
     else:
         raise AssertionError("expected RetrievalServiceError")
