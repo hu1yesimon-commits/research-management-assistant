@@ -266,6 +266,43 @@ class ResearchQueryResponse(BaseModel):
     knowledge: ResearchKnowledgeSection
 
 
+class ResearchAssistantNextAction(BaseModel):
+    type: Literal["choose_intent", "upload_pdf", "select_idea", "none"]
+    options: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
+class ResearchAssistantError(BaseModel):
+    section: Literal["coverage", "discovery", "knowledge", "idea", "routing"]
+    message: str
+
+
+class ResearchAssistantRequest(BaseModel):
+    query: str
+    intent: Literal["auto", "search", "research"] = "auto"
+    experiment_log: ExperimentLogRequest | None = None
+    top_k: int = Field(default=5, ge=1, le=20)
+    idea_count: int = Field(default=3, ge=3, le=5)
+    save_log: bool = True
+    include_discovery: bool = False
+
+
+class ResearchAssistantResponse(BaseModel):
+    query: str
+    intent: Literal["auto", "search", "research"]
+    mode: Literal["basic", "advanced"]
+    route: Literal["basic_explore", "advanced_ready", "advanced_search", "research_idea"]
+    coverage_score: float = Field(ge=0, le=1)
+    route_reason: str
+    assistant_message: str
+    next_action: ResearchAssistantNextAction | None = None
+    suggested_user_actions: list[str] = Field(default_factory=list)
+    discovery: ResearchDiscoverySection
+    knowledge: ResearchKnowledgeSection
+    ideas: list[IdeaOption] = Field(default_factory=list)
+    errors: list[ResearchAssistantError] = Field(default_factory=list)
+
+
 class PaperStatus(str, Enum):
     candidate = "candidate"
     accepted = "accepted"
