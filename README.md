@@ -89,7 +89,7 @@ Optional real providers:
 - `POST /research/query`
   输入 `{"query":"...","mode":"basic"|"advanced","include_discovery":true,"include_knowledge":true,"top_k":5}`，把外部 discovery 和内部 knowledge answer 编排到一个响应中；`discovery.candidates` 不是 grounded answer sources，`knowledge.sources` 只来自已 `embedded` 的知识块
 - `POST /research/assistant`
-  输入 research query 和可选 mode / context，经过 LangGraph assistant workflow 路由后返回 `mode`、`route`、`coverage_score`、`assistant_message`、`next_action`、`discovery`、`knowledge`、`ideas`、`errors`
+  输入 `query` 和可选 `intent`、`experiment_log`、`top_k`、`idea_count`、`save_log`、`include_discovery`，经过 LangGraph assistant workflow 路由后返回 `mode`、`route`、`coverage_score`、`assistant_message`、`next_action`、`discovery`、`knowledge`、`ideas`、`errors`
 
 ## Persistence
 
