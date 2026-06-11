@@ -26,8 +26,11 @@ class KnowledgeRetrievalService:
         if not normalized_query:
             raise RetrievalServiceError("query must not be empty", status_code=400)
 
-        query_embedding = self.embedding_service.embed_texts([normalized_query])[0]
-        vector_hits = self.vector_store_service.query_by_embedding(query_embedding, top_k=top_k)
+        try:
+            query_embedding = self.embedding_service.embed_texts([normalized_query])[0]
+            vector_hits = self.vector_store_service.query_by_embedding(query_embedding, top_k=top_k)
+        except Exception as exc:
+            raise RetrievalServiceError(f"knowledge retrieval failed: {exc}", status_code=502) from exc
 
         results = []
         for hit in vector_hits:

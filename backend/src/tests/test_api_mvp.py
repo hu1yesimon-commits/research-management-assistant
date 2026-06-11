@@ -13,15 +13,25 @@ from main import (
     get_knowledge_qa_service,
     get_memory_store,
     get_paper_discovery_graph,
+    get_research_assistant_workflow_service,
     get_research_workflow_service,
     get_vector_store_service,
 )
 from services.embedding_service import FakeEmbeddingService
 from services.knowledge_base import KnowledgeBase
 from services.query_rewriter import QueryRewriter
-from services.schemas import JudgeResult, KnowledgeAnswerResponse, KnowledgeAnswerSource, PaperId, PaperMetadata
+from services.schemas import (
+    JudgeResult,
+    KnowledgeAnswerResponse,
+    KnowledgeAnswerSource,
+    KnowledgeSearchResponse,
+    KnowledgeSearchResult,
+    PaperId,
+    PaperMetadata,
+)
 from services.vector_store import FakeVectorStoreService
 from services.answer_service import FakeGroundedAnswerGenerator
+from services.research_assistant_workflow import ResearchAssistantWorkflowService
 from services.research_workflow import ResearchWorkflowService
 
 
@@ -153,9 +163,32 @@ class FakeKnowledgeQAService:
             ],
             mode="deterministic",
         )
+        self.retrieval_service = FakeRetrievalService(self.response)
 
     def answer(self, question: str, top_k: int = 5) -> KnowledgeAnswerResponse:
         return self.response.model_copy(update={"question": question})
+
+
+class FakeRetrievalService:
+    def __init__(self, response: KnowledgeAnswerResponse):
+        self.response = response
+
+    def search(self, query: str, top_k: int = 5) -> KnowledgeSearchResponse:
+        return KnowledgeSearchResponse(
+            query=query,
+            top_k=top_k,
+            results=[
+                KnowledgeSearchResult(
+                    paper_id=source.paper_id,
+                    title=source.title,
+                    chunk_index=source.chunk_index,
+                    distance=source.distance,
+                    text=source.text,
+                    vector_ref=source.vector_ref,
+                )
+                for source in self.response.sources
+            ],
+        )
 
 
 def override_store_with_path(test_db):
@@ -450,6 +483,102 @@ def test_research_query_rejects_when_both_sections_disabled(tmp_path):
     )
 
     assert response.status_code == 400
+
+    app.dependency_overrides.clear()
+
+
+def test_research_assistant_basic_explore_response(tmp_path):
+    test_db = tmp_path / "api-research-assistant.sqlite3"
+    store = get_memory_store(str(test_db))
+    workflow = ResearchAssistantWorkflowService(
+        store=store,
+        discovery_graph=FakeGraph(store),
+        knowledge_qa_service=FakeKnowledgeQAService(
+            response=KnowledgeAnswerResponse(
+                question="brand new topic",
+                answer="No relevant knowledge chunks were found.",
+                sources=[],
+                mode="deterministic",
+            )
+        ),
+        idea_service=object(),
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_research_assistant_workflow_service] = lambda: workflow
+    client = TestClient(app)
+
+    response = client.post("/research/assistant", json={"query": "brand new topic", "top_k": 5})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "basic_explore"
+    assert body["mode"] == "basic"
+    assert body["discovery"]["enabled"] is True
+    assert body["knowledge"]["answer"] == "No relevant knowledge chunks were found."
+    assert body["knowledge"]["sources"] == []
+    assert body["next_action"]["type"] == "upload_pdf"
+
+    app.dependency_overrides.clear()
+
+
+def test_research_assistant_rejects_blank_query(tmp_path):
+    test_db = tmp_path / "api-research-assistant-blank.sqlite3"
+    store = get_memory_store(str(test_db))
+    workflow = ResearchAssistantWorkflowService(
+        store=store,
+        discovery_graph=FakeGraph(store),
+        knowledge_qa_service=FakeKnowledgeQAService(),
+        idea_service=object(),
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_research_assistant_workflow_service] = lambda: workflow
+    client = TestClient(app)
+
+    response = client.post("/research/assistant", json={"query": "   "})
+
+    assert response.status_code == 400
+
+    app.dependency_overrides.clear()
+
+
+def test_research_assistant_research_include_discovery_uses_default_dependency_graph(tmp_path):
+    test_db = tmp_path / "api-research-assistant-discovery.sqlite3"
+    store = get_memory_store(str(test_db))
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_paper_discovery_graph] = lambda: FakeGraph(store)
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
+    app.dependency_overrides[get_vector_store_service] = lambda: FakeVectorStoreService()
+    app.dependency_overrides[get_answer_generator] = lambda: FakeGroundedAnswerGenerator()
+    client = TestClient(app)
+
+    response = client.post(
+        "/research/assistant",
+        json={
+            "query": "graph reconstruction precision",
+            "intent": "research",
+            "experiment_log": {
+                "task": "graph reconstruction",
+                "model": "GCN",
+                "dataset": "citation graph",
+                "metric_problem": "precision is low",
+                "tried_methods": ["focal loss"],
+                "observation": "recall improves but precision drops",
+                "goal": "improve graph reconstruction precision",
+                "tags": ["graph"],
+            },
+            "include_discovery": True,
+            "top_k": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "research_idea"
+    assert body["discovery"]["enabled"] is True
+    assert body["discovery"]["candidates"][0]["paper"]["paper_id"] == "api-paper-1"
 
     app.dependency_overrides.clear()
 

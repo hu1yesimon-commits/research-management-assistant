@@ -10,6 +10,7 @@ Implemented and demo-ready:
 
 - Research Workbench frontend: unified `/research/query` UI, discovery/knowledge split view, saved candidate lifecycle, PDF upload/embed controls, and Idea Assistant panel.
 - Backend MVP endpoints: paper discovery, accept/upload/embed lifecycle, retrieval, grounded answer, unified research query, structured experiment logs, Idea Assistant, and Memory System review APIs.
+- Agent Workflow entrypoint: `POST /research/assistant` uses a LangGraph thin orchestration layer to route between `basic_explore`, `advanced_ready`, `advanced_search`, and `research_idea`, while reusing existing discovery, knowledge, memory, and idea services.
 - Idea Assistant MVP: structured experiment log in, retrieval-backed evidence lookup, deterministic 3-5 idea options out.
 - Memory System MVP: structured logs as episodic evidence, deterministic `semantic_proposal` candidates, user accept/reject review, confirmed semantic memory, and explicit archive.
 
@@ -87,6 +88,8 @@ Optional real providers:
   输入一条结构化实验日志，构造 retrieval query，检索本地已 `embedded` 的知识块，并返回 3-5 条结构化 idea options；默认 deterministic/offline，不默认调用真实 provider 或外部 discovery
 - `POST /research/query`
   输入 `{"query":"...","mode":"basic"|"advanced","include_discovery":true,"include_knowledge":true,"top_k":5}`，把外部 discovery 和内部 knowledge answer 编排到一个响应中；`discovery.candidates` 不是 grounded answer sources，`knowledge.sources` 只来自已 `embedded` 的知识块
+- `POST /research/assistant`
+  输入 `query` 和可选 `intent`、`experiment_log`、`top_k`、`idea_count`、`save_log`、`include_discovery`，经过 LangGraph assistant workflow 路由后返回 `mode`、`route`、`coverage_score`、`assistant_message`、`next_action`、`discovery`、`knowledge`、`ideas`、`errors`
 
 ## Persistence
 
@@ -376,6 +379,7 @@ npm run dev -- --host 127.0.0.1
 - 生产级前端界面
 - 数据库迁移机制
 - stale/conflict 自动判断和自动处理；当前只保留 review-gated future-work contract
+- `/research/assistant` does not implement multi-turn checkpointing, SSE trace streaming, MCP integration, or automatic stale/conflict memory handling.
 - Memory 写入 Chroma 或 graph/vector memory retrieval
 - 多轮 chat memory、streaming / SSE、生产级评测闭环
 

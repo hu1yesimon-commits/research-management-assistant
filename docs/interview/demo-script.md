@@ -30,6 +30,8 @@ I built it as a local-first FastAPI + LangGraph + SQLite backend with a Vue Rese
 
 The system defaults to deterministic/offline providers for reliable testing, but it also supports optional real providers such as DeepSeek for judging/answers and BGE-M3 + Chroma for local embedding/vector storage.
 
+`POST /research/assistant` is the Agent Workflow entrypoint. It returns `mode`, `route`, `coverage_score`, `assistant_message`, `next_action`, plus discovery, knowledge, and idea sections. The frontend can be redesigned later around this response, but the first version keeps the backend contract stable.
+
 ## 3. Before Demo
 
 From the project root:
