@@ -52,7 +52,7 @@ def make_research_assistant_nodes(
 
     def run_basic_explore(state: dict) -> dict:
         discovery, errors = _run_discovery(discovery_graph, state, enabled=True)
-        knowledge, knowledge_errors = _run_knowledge(knowledge_qa_service, state, enabled=True)
+        knowledge, knowledge_errors = _knowledge_from_state_or_service(knowledge_qa_service, state, enabled=True)
         errors.extend(knowledge_errors)
         return {
             "discovery": discovery.model_dump(),
@@ -96,7 +96,7 @@ def make_research_assistant_nodes(
 
     def run_advanced_search(state: dict) -> dict:
         discovery, errors = _run_discovery(discovery_graph, state, enabled=True)
-        knowledge, knowledge_errors = _run_knowledge(knowledge_qa_service, state, enabled=True)
+        knowledge, knowledge_errors = _knowledge_from_state_or_service(knowledge_qa_service, state, enabled=True)
         errors.extend(knowledge_errors)
         return {
             "discovery": discovery.model_dump(),
@@ -222,6 +222,17 @@ def _run_knowledge(knowledge_qa_service, state: dict, enabled: bool) -> tuple[Re
         return ResearchKnowledgeSection(enabled=True, answer=None, sources=[], error=exc.detail, mode=None), [
             {"section": "knowledge", "message": exc.detail}
         ]
+
+
+def _knowledge_from_state_or_service(
+    knowledge_qa_service,
+    state: dict,
+    enabled: bool,
+) -> tuple[ResearchKnowledgeSection, list[dict]]:
+    cached_knowledge = state.get("knowledge")
+    if cached_knowledge and cached_knowledge.get("answer") is not None:
+        return ResearchKnowledgeSection(**{**cached_knowledge, "enabled": enabled}), []
+    return _run_knowledge(knowledge_qa_service, state, enabled=enabled)
 
 
 def _knowledge_section(enabled: bool, response) -> ResearchKnowledgeSection:

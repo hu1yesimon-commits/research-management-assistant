@@ -136,6 +136,7 @@ def test_auto_low_coverage_routes_to_basic_explore():
     assert response.route == "basic_explore"
     assert response.discovery.candidates[0]["paper"]["paper_id"] == "d1"
     assert response.knowledge.answer == "No relevant knowledge chunks were found."
+    assert knowledge.calls == [("brand new topic", 3)]
     assert response.next_action is not None
     assert response.next_action.type == "upload_pdf"
 
@@ -162,10 +163,11 @@ def test_auto_high_coverage_routes_to_advanced_ready_without_running_discovery()
 
 
 def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery_failure():
+    knowledge = FakeKnowledgeQAService()
     service = build_service(
         store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
         discovery_graph=FakeDiscoveryGraph(error=RuntimeError("discovery offline")),
-        knowledge_service=FakeKnowledgeQAService(),
+        knowledge_service=knowledge,
     )
 
     response = service.query(query="graph reconstruction precision", intent="search", top_k=5)
@@ -175,6 +177,7 @@ def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery
     assert response.discovery.error == "discovery offline"
     assert response.knowledge.answer == "Knowledge answer"
     assert response.errors[0].section == "discovery"
+    assert knowledge.calls == [("graph reconstruction precision", 5)]
 
 
 def test_research_intent_requires_experiment_log():
