@@ -13,6 +13,7 @@ from main import (
     get_knowledge_qa_service,
     get_memory_store,
     get_paper_discovery_graph,
+    get_research_assistant_workflow_service,
     get_research_workflow_service,
     get_vector_store_service,
 )
@@ -22,6 +23,7 @@ from services.query_rewriter import QueryRewriter
 from services.schemas import JudgeResult, KnowledgeAnswerResponse, KnowledgeAnswerSource, PaperId, PaperMetadata
 from services.vector_store import FakeVectorStoreService
 from services.answer_service import FakeGroundedAnswerGenerator
+from services.research_assistant_workflow import ResearchAssistantWorkflowService
 from services.research_workflow import ResearchWorkflowService
 
 
@@ -448,6 +450,62 @@ def test_research_query_rejects_when_both_sections_disabled(tmp_path):
             "include_knowledge": False,
         },
     )
+
+    assert response.status_code == 400
+
+    app.dependency_overrides.clear()
+
+
+def test_research_assistant_basic_explore_response(tmp_path):
+    test_db = tmp_path / "api-research-assistant.sqlite3"
+    store = get_memory_store(str(test_db))
+    workflow = ResearchAssistantWorkflowService(
+        store=store,
+        discovery_graph=FakeGraph(store),
+        knowledge_qa_service=FakeKnowledgeQAService(
+            response=KnowledgeAnswerResponse(
+                question="brand new topic",
+                answer="No relevant knowledge chunks were found.",
+                sources=[],
+                mode="deterministic",
+            )
+        ),
+        idea_service=object(),
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_research_assistant_workflow_service] = lambda: workflow
+    client = TestClient(app)
+
+    response = client.post("/research/assistant", json={"query": "brand new topic", "top_k": 5})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "basic_explore"
+    assert body["mode"] == "basic"
+    assert body["discovery"]["enabled"] is True
+    assert body["knowledge"]["answer"] == "No relevant knowledge chunks were found."
+    assert body["knowledge"]["sources"] == []
+    assert body["next_action"]["type"] == "upload_pdf"
+
+    app.dependency_overrides.clear()
+
+
+def test_research_assistant_rejects_blank_query(tmp_path):
+    test_db = tmp_path / "api-research-assistant-blank.sqlite3"
+    store = get_memory_store(str(test_db))
+    workflow = ResearchAssistantWorkflowService(
+        store=store,
+        discovery_graph=FakeGraph(store),
+        knowledge_qa_service=FakeKnowledgeQAService(),
+        idea_service=object(),
+    )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    app.dependency_overrides[get_research_assistant_workflow_service] = lambda: workflow
+    client = TestClient(app)
+
+    response = client.post("/research/assistant", json={"query": "   "})
 
     assert response.status_code == 400
 

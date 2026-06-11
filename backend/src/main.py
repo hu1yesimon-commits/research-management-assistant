@@ -16,6 +16,7 @@ from services.memory_extractor import MemoryExtractor
 from services.memory_service import MemoryService, MemoryServiceError
 from services.memory_store import MemoryStore
 from services.qa_service import KnowledgeQAService, QAServiceError
+from services.research_assistant_workflow import ResearchAssistantWorkflowError, ResearchAssistantWorkflowService
 from services.research_workflow import ResearchWorkflowError, ResearchWorkflowService
 from services.retrieval_service import KnowledgeRetrievalService, RetrievalServiceError
 from services.schemas import (
@@ -29,6 +30,8 @@ from services.schemas import (
     LogRequest,
     MemoryCandidate,
     PaperStatus,
+    ResearchAssistantRequest,
+    ResearchAssistantResponse,
     ResearchQueryRequest,
     SearchRequest,
     SemanticMemoryEntry,
@@ -246,6 +249,20 @@ def get_research_workflow_service(
     )
 
 
+def get_research_assistant_workflow_service(
+    store: MemoryStore = Depends(get_memory_store),
+    discovery_graph=Depends(get_paper_discovery_graph),
+    qa_service: KnowledgeQAService = Depends(get_knowledge_qa_service),
+    idea_service: IdeaRecommendationService = Depends(get_idea_recommendation_service),
+) -> ResearchAssistantWorkflowService:
+    return ResearchAssistantWorkflowService(
+        store=store,
+        discovery_graph=discovery_graph,
+        knowledge_qa_service=qa_service,
+        idea_service=idea_service,
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -372,6 +389,25 @@ def research_query(
             top_k=request.top_k,
         )
     except ResearchWorkflowError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@app.post("/research/assistant", response_model=ResearchAssistantResponse)
+def research_assistant(
+    request: ResearchAssistantRequest,
+    workflow_service: ResearchAssistantWorkflowService = Depends(get_research_assistant_workflow_service),
+):
+    try:
+        return workflow_service.query(
+            query=request.query,
+            intent=request.intent,
+            experiment_log=request.experiment_log,
+            top_k=request.top_k,
+            idea_count=request.idea_count,
+            save_log=request.save_log,
+            include_discovery=request.include_discovery,
+        )
+    except ResearchAssistantWorkflowError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
