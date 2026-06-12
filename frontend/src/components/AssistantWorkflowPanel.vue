@@ -26,8 +26,7 @@
           <span>Intent</span>
           <select id="assistant-intent" v-model="form.intent">
             <option value="auto">Auto</option>
-            <option value="knowledge">Knowledge</option>
-            <option value="discovery">Discovery</option>
+            <option value="search">Search</option>
             <option value="research">Research</option>
           </select>
         </label>
@@ -37,7 +36,7 @@
           <input id="assistant-top-k" v-model.number="form.top_k" type="number" min="1" max="20" />
         </label>
 
-        <button class="button button--primary" type="submit" :disabled="isBusy || !form.query">
+        <button class="button button--primary" type="submit" :disabled="isSubmitDisabled">
           {{ isBusy ? "Running..." : "Run assistant" }}
         </button>
       </div>
@@ -143,7 +142,13 @@ const coveragePercent = computed(() => {
   return `${Math.round(response.value.coverage_score * 100)}%`;
 });
 
+const isSubmitDisabled = computed(() => isBusy.value || !form.query || form.intent === "research");
+
 async function submitAssistant() {
+  if (form.intent === "research") {
+    return;
+  }
+
   isBusy.value = true;
   error.value = "";
   response.value = null;

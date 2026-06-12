@@ -10,7 +10,7 @@ const assistantResponse = {
   route_reason: "Existing knowledge has enough overlap with the query.",
   assistant_message: "I can search with local context and discovery together.",
   next_action: {
-    type: "select_candidate",
+    type: "upload_pdf",
     message: "Review the recommended papers.",
     options: ["accept", "upload_pdf"],
   },
@@ -37,6 +37,11 @@ describe("AssistantWorkflowPanel", () => {
     const wrapper = mountPanel();
 
     expect(wrapper.find("#assistant-intent").element.value).toBe("auto");
+    expect(wrapper.findAll("#assistant-intent option").map((option) => option.element.value)).toEqual([
+      "auto",
+      "search",
+      "research",
+    ]);
     expect(wrapper.find("#assistant-top-k").element.value).toBe("5");
   });
 
@@ -45,13 +50,13 @@ describe("AssistantWorkflowPanel", () => {
     const wrapper = mountPanel({ props: { runAssistant } });
 
     await wrapper.find("#assistant-query").setValue("graph reconstruction from papers");
-    await wrapper.find("#assistant-intent").setValue("knowledge");
+    await wrapper.find("#assistant-intent").setValue("search");
     await wrapper.find("#assistant-top-k").setValue("8");
     await wrapper.find("form.assistant-form").trigger("submit.prevent");
 
     expect(runAssistant).toHaveBeenCalledWith({
       query: "graph reconstruction from papers",
-      intent: "knowledge",
+      intent: "search",
       top_k: 8,
     });
     expect(wrapper.emitted("success")).toEqual([[assistantResponse]]);
@@ -91,11 +96,17 @@ describe("AssistantWorkflowPanel", () => {
     expect(wrapper.emitted("success")).toBeUndefined();
   });
 
-  test("shows the research intent hint when research is selected", async () => {
-    const wrapper = mountPanel();
+  test("disables submit and avoids runner calls when research intent is selected", async () => {
+    const runAssistant = vi.fn().mockResolvedValue(assistantResponse);
+    const wrapper = mountPanel({ props: { runAssistant } });
 
+    await wrapper.find("#assistant-query").setValue("research idea from experiment logs");
     await wrapper.find("#assistant-intent").setValue("research");
+    await wrapper.find("form.assistant-form").trigger("submit.prevent");
 
+    expect(wrapper.find("button[type='submit']").element.disabled).toBe(true);
     expect(wrapper.text()).toContain("Structured experiment logs stay in the Idea Assistant section below");
+    expect(runAssistant).not.toHaveBeenCalled();
+    expect(wrapper.emitted("success")).toBeUndefined();
   });
 });
