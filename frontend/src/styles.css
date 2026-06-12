@@ -158,6 +158,10 @@ textarea {
   min-width: 0;
 }
 
+.panel--full {
+  margin-bottom: 18px;
+}
+
 .panel__heading,
 .card-title-row,
 .section-title {
@@ -171,6 +175,11 @@ textarea {
   margin-top: 22px;
 }
 
+.workbench-shell > .meta {
+  display: block;
+  margin: 0 0 10px;
+}
+
 .stack-list {
   list-style: none;
   padding: 0;
@@ -181,11 +190,58 @@ textarea {
 
 .candidate-card,
 .source-card,
+.idea-card,
 .lifecycle-card {
   background: rgba(8, 14, 22, 0.5);
   border: 1px solid rgba(134, 155, 179, 0.18);
   border-radius: 14px;
   padding: 14px;
+  min-width: 0;
+}
+
+.assistant-form {
+  margin-top: 16px;
+}
+
+.assistant-form__full {
+  display: block;
+}
+
+.assistant-form__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.assistant-form__controls .field {
+  min-width: 140px;
+}
+
+.assistant-form__controls .button {
+  min-height: 46px;
+}
+
+.assistant-form__status {
+  margin-top: 16px;
+}
+
+.assistant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assistant-actions li {
+  border: 1px solid rgba(134, 155, 179, 0.2);
+  border-radius: 10px;
+  background: rgba(95, 115, 138, 0.12);
+  color: var(--text);
+  padding: 8px 10px;
   min-width: 0;
 }
 
@@ -355,5 +411,11 @@ textarea {
   .query-form__grid,
   .kv-grid {
     grid-template-columns: 1fr;
+  }
+
+  .assistant-form__controls,
+  .assistant-form__controls .field,
+  .assistant-form__controls .button {
+    width: 100%;
   }
 }
