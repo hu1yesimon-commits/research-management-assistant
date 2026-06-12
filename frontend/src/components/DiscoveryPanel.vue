@@ -14,9 +14,9 @@
       <strong>Discovery error:</strong> {{ discovery.error }}
     </div>
 
-    <div v-if="discovery.candidates?.length" class="alert alert--warning">
+    <div v-if="shouldShowScoringWarning" class="alert alert--warning">
       <strong>Showing {{ discovery.candidates.length }} discovery candidates.</strong>
-      <span> Current judge output may be a placeholder.</span>
+      <span v-if="hasMockScoringCandidates"> Current judge output may be a placeholder.</span>
       <span v-if="hasTiedFinalScores"> Scores are tied across all returned candidates, so this should not be read as meaningful ranking quality.</span>
     </div>
 
@@ -96,6 +96,14 @@ const hasTiedFinalScores = computed(() => {
     return false;
   }
   return new Set(scores).size === 1;
+});
+
+const hasMockScoringCandidates = computed(() => {
+  return Boolean(props.discovery.candidates?.some((candidate) => hasMockScoring(candidate)));
+});
+
+const shouldShowScoringWarning = computed(() => {
+  return hasMockScoringCandidates.value || hasTiedFinalScores.value;
 });
 
 function getCandidateKey(candidate) {
