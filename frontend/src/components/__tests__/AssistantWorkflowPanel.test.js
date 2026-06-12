@@ -78,6 +78,8 @@ describe("AssistantWorkflowPanel", () => {
     expect(text).toContain("72%");
     expect(text).toContain("I can search with local context and discovery together.");
     expect(text).toContain("Review the recommended papers.");
+    expect(text).toContain("Review top papers");
+    expect(text).toContain("Upload selected PDFs");
     expect(text).toContain("memory: memory unavailable");
     expect(text).toContain("Try a smaller validation slice");
     expect(text).toContain("It reduces experiment cost.");

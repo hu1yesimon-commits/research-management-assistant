@@ -76,6 +76,16 @@
       </div>
     </div>
 
+    <div v-if="response?.suggested_user_actions?.length" class="panel__section">
+      <div class="section-title">
+        <h3>Suggested Actions</h3>
+        <span class="meta">{{ response.suggested_user_actions.length }} action{{ response.suggested_user_actions.length === 1 ? "" : "s" }}</span>
+      </div>
+      <ul class="assistant-actions">
+        <li v-for="action in response.suggested_user_actions" :key="action">{{ action }}</li>
+      </ul>
+    </div>
+
     <div v-if="response?.errors?.length" class="panel__section">
       <div class="section-title">
         <h3>Workflow Notes</h3>
@@ -188,6 +198,20 @@ async function submitAssistant() {
 
 .assistant-form__status {
   margin-top: 16px;
+}
+
+.assistant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assistant-actions li {
+  color: var(--text-muted);
+  font-size: 0.86rem;
 }
 
 .idea-card + .idea-card {
