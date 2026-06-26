@@ -471,7 +471,321 @@ Required migration areas:
 6. Split or wrap service responsibilities so no `DiscoveryService` owns the full pipeline order.
 7. Add tests for routing, boundary contracts, partial failure, and advanced-ready grounded answer behavior.
 
-## 12. Non-Goals
+## 12. Codebase Mapping
+
+This section maps the V1 architecture to the current repository so an implementation plan can be written at PR level.
+
+### 12.1 Current Files
+
+| V1 Concept | Current Location | Migration Notes |
+| --- | --- | --- |
+| Main graph builder | `backend/src/graph/builder.py` | `build_research_assistant_graph(...)` already exists and should remain the main graph entry. |
+| Main graph nodes | `backend/src/graph/assistant_nodes.py` | Update routing, `advanced_ready`, discovery boundary mapping, and stage-level errors here. |
+| Main state | `backend/src/graph/assistant_state.py` | Rename or map `discovery/knowledge/ideas` toward result-summary fields. Keep compatibility during migration. |
+| Discovery subgraph builder | `backend/src/graph/builder.py` | `build_paper_discovery_graph(...)` already owns the discovery order. Keep this ownership. |
+| Discovery subgraph nodes | `backend/src/graph/nodes.py` | Keep rewrite, search, postprocess, judge, and rank as subgraph nodes. Avoid moving this order into a service. |
+| Discovery subgraph state | `backend/src/graph/state.py` | Keep intermediate discovery fields here, not in main state. |
+| Request/response schemas | `backend/src/services/schemas.py` | Add result contracts, structured next-action options, and stage-level error schema. |
+| Workflow service wrapper | `backend/src/services/research_assistant_workflow.py` | Keep FastAPI-to-graph translation here. Add compatibility mapping if response field names change. |
+| Query rewrite | `backend/src/services/query_rewriter.py` | Treat as atomic computation. |
+| Multi-source search | `backend/src/services/paper_search.py` and `backend/src/services/adapters/` | Treat as atomic computation. |
+| Postprocess | `backend/src/services/normalizer.py`, `backend/src/services/deduplicator.py` | Treat normalization and dedupe as atomic computation. |
+| LLM judge | `backend/src/services/LlmPaperSelect.py` | Treat as feature generation only. Do not give it route control. |
+| Scoring/ranking | `backend/src/services/scoreutils.py`, `backend/src/graph/nodes.py` | Rank aggregation remains deterministic and inspectable. |
+| Knowledge QA | `backend/src/services/qa_service.py`, `backend/src/services/answer_service.py` | Use only when sources exist; keep no-source fallback explicit. |
+| Idea generation | `backend/src/services/idea_service.py` | Trigger only from current-request `experiment_log` or explicit future `experiment_log_id`. |
+| API route | `backend/src/main.py` | Keep `/research/assistant` as the Agent Workflow endpoint. |
+| Assistant tests | `backend/src/tests/test_research_assistant_workflow.py`, `backend/src/tests/test_api_mvp.py` | Extend for routing, result contracts, errors, and `advanced_ready`. |
+| Discovery tests | `backend/src/tests/test_paper_discovery_graph.py` | Extend for parent-child memory snapshot and result summary. |
+
+### 12.2 Preferred File Additions
+
+The implementation may add small schema-focused files if `services/schemas.py` becomes too large:
+
+- `backend/src/services/assistant_contracts.py`
+- `backend/src/services/discovery_contracts.py`
+
+If added, `services/schemas.py` should re-export or import those models so existing API imports remain stable during migration.
+
+Do not create a new graph package hierarchy unless implementation evidence shows the current files are too large to safely modify.
+
+## 13. Implementation Contracts
+
+These are target contracts for the implementation plan. Exact names may be adjusted to match local style, but the semantics should remain stable.
+
+### 13.1 Result Contracts
+
+```python
+class AssistantStageError(BaseModel):
+    stage: Literal[
+        "coverage",
+        "query_rewrite",
+        "multi_search",
+        "postprocess",
+        "llm_judge",
+        "rank",
+        "knowledge_answer",
+        "idea_generation",
+        "routing",
+    ]
+    message: str
+    recoverable: bool = True
+```
+
+```python
+class DiscoveryResult(BaseModel):
+    enabled: bool
+    top_k: list[dict] = Field(default_factory=list)
+    rewritten_queries: list[str] = Field(default_factory=list)
+    total_raw: int = 0
+    total_deduped: int = 0
+    scoring_summary: dict = Field(default_factory=dict)
+    error: str | None = None
+```
+
+```python
+class KnowledgeResult(BaseModel):
+    enabled: bool
+    answer: str | None = None
+    sources: list[KnowledgeAnswerSource] = Field(default_factory=list)
+    mode: str | None = None
+    error: str | None = None
+```
+
+```python
+class IdeaResult(BaseModel):
+    enabled: bool
+    ideas: list[IdeaOption] = Field(default_factory=list)
+    supporting_evidence: list[IdeaSupportingEvidence] = Field(default_factory=list)
+    log_id: int | None = None
+    error: str | None = None
+```
+
+### 13.2 next_action Contract
+
+```python
+class NextActionOption(BaseModel):
+    id: str
+    label: str
+    request_patch: dict = Field(default_factory=dict)
+```
+
+```python
+class ResearchAssistantNextAction(BaseModel):
+    type: Literal[
+        "choose_path",
+        "upload_pdf",
+        "select_idea",
+        "none",
+    ]
+    options: list[NextActionOption] = Field(default_factory=list)
+    message: str | None = None
+```
+
+During compatibility migration, string options may still be accepted at the service boundary and normalized into structured options.
+
+### 13.3 Node Contract
+
+Main graph nodes should follow this shape:
+
+```python
+def node_name(state: dict) -> dict:
+    return {
+        "field_to_update": value,
+        "errors": state["errors"] + new_errors,
+    }
+```
+
+Rules:
+
+- Nodes return partial state updates only.
+- Route nodes update `route`, `mode`, and `route_reason`; they do not execute services.
+- Execution nodes update one or more result summaries plus `assistant_message`, `next_action`, and `errors`.
+- Subgraph invocation must receive the main graph memory snapshot:
+
+```python
+result = discovery_graph.invoke(
+    {
+        "mode": state["mode"],
+        "user_query": state["query"],
+        "memory_context": state["memory_context"],
+        "rewritten_queries": [],
+        "raw_results": [],
+        "normalized_papers": [],
+        "deduped_papers": [],
+        "judge_results": [],
+        "ranked_candidates": [],
+    }
+)
+```
+
+### 13.4 Discovery Result Mapping
+
+The main graph should map subgraph output to `DiscoveryResult` at the boundary:
+
+```python
+DiscoveryResult(
+    enabled=True,
+    top_k=result["ranked_candidates"][: state["top_k"]],
+    rewritten_queries=result.get("rewritten_queries", []),
+    total_raw=len(result.get("raw_results", [])),
+    total_deduped=len(result.get("deduped_papers", [])),
+    scoring_summary={
+        "ranked_count": len(result.get("ranked_candidates", [])),
+    },
+    error=None,
+)
+```
+
+The main graph may count subgraph internals while constructing the summary, but it must not use those internals for routing or business decisions.
+
+## 14. Migration Phases
+
+The implementation should be split into safe, testable phases.
+
+### Phase 1: Contract Additions Without Behavior Change
+
+Goal:
+
+- Add new Pydantic contracts and helper mapping functions.
+- Preserve existing API response shape.
+
+Allowed changes:
+
+- Add `AssistantStageError`, `DiscoveryResult`, `KnowledgeResult`, `IdeaResult`, and structured next-action option types.
+- Add conversion helpers from current `ResearchDiscoverySection` and `ResearchKnowledgeSection`.
+- Add tests for model validation and compatibility mapping.
+
+Not allowed:
+
+- Do not change route behavior.
+- Do not remove `discovery`, `knowledge`, or `ideas` fields yet.
+
+### Phase 2: Error Model Upgrade
+
+Goal:
+
+- Move from broad `section` errors to stage-level recoverable errors.
+
+Allowed changes:
+
+- Update graph nodes to emit `stage/message/recoverable`.
+- Keep response compatibility if old tests or UI still expect broad fields, either by temporary aliasing or by updating tests in the same PR.
+
+Not allowed:
+
+- Do not change discovery ranking or QA behavior.
+
+### Phase 3: Routing Semantics Fix
+
+Goal:
+
+- Enforce current-request experiment log trigger semantics.
+
+Allowed changes:
+
+- Update `route_request`.
+- Add tests proving stored memory logs do not trigger `research_idea`.
+- Add future-safe support for `experiment_log_id` only if the persistence lookup is already available; otherwise document it as future schema.
+
+Not allowed:
+
+- Do not introduce session resume or checkpointing.
+
+### Phase 4: Discovery Boundary Enforcement
+
+Goal:
+
+- Make the main graph consume `DiscoveryResult` summaries rather than raw subgraph internals.
+
+Allowed changes:
+
+- Add `_discovery_result_from_subgraph(...)` helper.
+- Pass `state["memory_context"]` into discovery subgraph invocation.
+- Keep intermediate discovery state inside `PaperDiscoveryState`.
+
+Not allowed:
+
+- Do not move pipeline order into a service.
+- Do not introduce a full `DiscoveryService.run_pipeline()`.
+
+### Phase 5: advanced_ready Grounded Answer
+
+Goal:
+
+- Convert `advanced_ready` from a guidance-only node into an answer-and-guide node.
+
+Allowed changes:
+
+- Call Knowledge QA.
+- Return grounded answer when sources exist.
+- Return explicit no-source fallback when sources do not exist.
+- Return structured `next_action`.
+
+Not allowed:
+
+- Do not generate ungrounded answers.
+
+### Phase 6: Response Shape Migration
+
+Goal:
+
+- Move public assistant response toward `discovery_result`, `knowledge_result`, and `idea_result`.
+
+Allowed changes:
+
+- Add new fields.
+- Keep old fields as aliases for one migration window if the frontend still depends on them.
+- Update frontend only if the API change requires it.
+
+Not allowed:
+
+- Do not break `/research/query`.
+- Do not remove old fields before tests and frontend usage are updated.
+
+### Phase 7: Final Verification And Trace Hygiene
+
+Goal:
+
+- Prove the refactor preserved current behavior while adding the new boundaries.
+
+Required checks:
+
+- Backend assistant workflow tests.
+- Discovery graph tests.
+- API smoke tests for `/research/assistant`.
+- Offline MVP smoke if route-level behavior changes.
+- `git diff --check`.
+
+## 15. Execution Constraints
+
+Implementation must follow these constraints:
+
+- No behavior change in Phase 1 except accepting new typed contracts.
+- Subgraph must remain runnable after every phase.
+- `/research/assistant` must return a structurally valid response after every phase.
+- `/research/query` must remain backward compatible.
+- Routing must stay deterministic.
+- Services must remain stateless with respect to graph routing.
+- Discovery pipeline order must remain owned by the subgraph.
+- Old stored logs must not automatically trigger `research_idea`.
+- LLM failures must be recoverable where possible.
+- Public response schema changes must be covered by tests before frontend changes.
+
+## 16. PR-Sized Task Checklist
+
+The implementation plan should split work into these PR-sized units:
+
+1. Add assistant result and error contracts with compatibility tests.
+2. Upgrade internal errors to stage-level recoverable errors.
+3. Fix routing semantics for current-request experiment logs.
+4. Add discovery boundary helper and pass memory snapshot into subgraph.
+5. Convert `advanced_ready` to grounded QA plus next-action.
+6. Migrate assistant response fields toward result summaries.
+7. Clean up service ownership so no service owns the full discovery pipeline.
+8. Run full verification and update docs if behavior changed.
+
+## 17. Non-Goals
 
 V1 does not implement:
 
@@ -484,7 +798,7 @@ V1 does not implement:
 - ungrounded QA generation
 - full frontend redesign
 
-## 13. Interview Narrative
+## 18. Interview Narrative
 
 Use this framing:
 
