@@ -25,7 +25,7 @@ const assistantResponse = {
       next_small_experiment: "Run one baseline comparison.",
     },
   ],
-  errors: [{ section: "memory", message: "memory unavailable" }],
+  errors: [{ stage: "multi_search", message: "discovery unavailable" }],
 };
 
 function mountPanel(options = {}) {
@@ -80,7 +80,7 @@ describe("AssistantWorkflowPanel", () => {
     expect(text).toContain("Review the recommended papers.");
     expect(text).toContain("Review top papers");
     expect(text).toContain("Upload selected PDFs");
-    expect(text).toContain("memory: memory unavailable");
+    expect(text).toContain("multi_search: discovery unavailable");
     expect(text).toContain("Try a smaller validation slice");
     expect(text).toContain("It reduces experiment cost.");
     expect(text).toContain("accuracy@10");

@@ -1,5 +1,6 @@
 import os
 
+from graph.errors import DiscoveryStageError
 from services.schemas import JudgeResult
 from services.LlmPaperSelect import LLMJudge
 from services.deduplicator import DeDuplicator
@@ -20,23 +21,38 @@ def make_nodes(
         return {"memory_context": memory_store.build_memory_context()}
 
     def rewrite_query(state: PaperDiscoveryState) -> dict:
-        return {
-            "rewritten_queries": query_rewriter.rewrite(
+        try:
+            rewritten_queries = query_rewriter.rewrite(
                 mode=state["mode"],
                 user_query=state["user_query"],
                 memory_context=state["memory_context"],
             )
-        }
+        except DiscoveryStageError:
+            raise
+        except Exception as exc:
+            raise DiscoveryStageError("query_rewrite", str(exc), recoverable=True) from exc
+        return {"rewritten_queries": rewritten_queries}
 
     def multi_source_search(state: PaperDiscoveryState) -> dict:
-        papers = []
-        for query in state["rewritten_queries"]:
-            papers.extend(search_service.search(query))
+        try:
+            papers = []
+            for query in state["rewritten_queries"]:
+                papers.extend(search_service.search(query))
+        except DiscoveryStageError:
+            raise
+        except Exception as exc:
+            raise DiscoveryStageError("multi_search", str(exc), recoverable=True) from exc
         return {"raw_results": papers, "normalized_papers": papers}
 
     def dedup_papers(state: PaperDiscoveryState) -> dict:
-        deduplicator = DeDuplicator(known_dois=memory_store.list_known_dois())
-        return {"deduped_papers": deduplicator.dedup(state["normalized_papers"])}
+        try:
+            deduplicator = DeDuplicator(known_dois=memory_store.list_known_dois())
+            deduped_papers = deduplicator.dedup(state["normalized_papers"])
+        except DiscoveryStageError:
+            raise
+        except Exception as exc:
+            raise DiscoveryStageError("postprocess", str(exc), recoverable=False) from exc
+        return {"deduped_papers": deduped_papers}
 
     def judge_papers(state: PaperDiscoveryState) -> dict:
         judge_results: list[JudgeResult] = []
@@ -71,16 +87,22 @@ def make_nodes(
         }
 
     def rank_papers(state: PaperDiscoveryState) -> dict:
-        ranked_candidates = [
-            {"paper": paper, "judgement": judgement}
-            for paper, judgement in zip(state["deduped_papers"], state["judge_results"], strict=False)
-        ]
-        ranked_candidates.sort(
-            key=lambda item: item["judgement"].final_score,
-            reverse=True,
-        )
+        try:
+            ranked_candidates = [
+                {"paper": paper, "judgement": judgement}
+                for paper, judgement in zip(state["deduped_papers"], state["judge_results"], strict=False)
+            ]
+            ranked_candidates.sort(
+                key=lambda item: item["judgement"].final_score,
+                reverse=True,
+            )
+            sorted_judge_results = judge.sort_by_final_score(state["judge_results"])
+        except DiscoveryStageError:
+            raise
+        except Exception as exc:
+            raise DiscoveryStageError("rank", str(exc), recoverable=False) from exc
         return {
-            "judge_results": judge.sort_by_final_score(state["judge_results"]),
+            "judge_results": sorted_judge_results,
             "ranked_candidates": ranked_candidates,
         }
 

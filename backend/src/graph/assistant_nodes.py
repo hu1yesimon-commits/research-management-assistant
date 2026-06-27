@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from graph.errors import DiscoveryStageError
 from services.coverage import calculate_coverage_score
 from services.idea_service import IdeaServiceError
 from services.qa_service import QAServiceError
@@ -154,10 +155,18 @@ def make_research_assistant_nodes(
                 idea_count=state["idea_count"],
             )
         except IdeaServiceError as exc:
+            discovery = ResearchDiscoverySection(enabled=False)
+            knowledge = ResearchKnowledgeSection(enabled=False)
             return {
+                "discovery": discovery.model_dump(),
+                "knowledge": knowledge.model_dump(),
                 "ideas": [],
+                "discovery_result": _discovery_result_from_section(discovery).model_dump(),
+                "knowledge_result": _knowledge_result_from_section(knowledge).model_dump(),
+                "idea_result": IdeaResult(enabled=True, error=exc.detail).model_dump(),
                 "assistant_message": "I could not generate idea recommendations from this experiment log.",
-                "errors": state["errors"] + [_stage_error("idea_generation", exc.detail)],
+                "errors": state["errors"]
+                + [_stage_error("idea_generation", exc.detail, recoverable=exc.status_code >= 500)],
             }
         discovery = ResearchDiscoverySection(
             enabled=response.discovery.enabled,
@@ -242,10 +251,9 @@ def _run_discovery(discovery_graph, state: dict, enabled: bool) -> tuple[Researc
             candidates=result["ranked_candidates"][: state["top_k"]],
             error=None,
         ), []
-    except Exception as exc:
-        message = str(exc)
-        return ResearchDiscoverySection(enabled=True, candidates=[], error=message), [
-            _stage_error("multi_search", message)
+    except DiscoveryStageError as exc:
+        return ResearchDiscoverySection(enabled=True, candidates=[], error=exc.detail), [
+            _stage_error(exc.stage, exc.detail, recoverable=exc.recoverable)
         ]
 
 

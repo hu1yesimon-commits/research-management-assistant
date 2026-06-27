@@ -1,4 +1,7 @@
+import pytest
+
 from graph.builder import build_paper_discovery_graph
+from graph.errors import DiscoveryStageError
 from services.memory_store import MemoryStore
 from services.query_rewriter import QueryRewriter
 from services.schemas import JudgeResult, PaperId, PaperMetadata
@@ -52,6 +55,16 @@ class PartiallyFailingJudge(FakeJudge):
         if paper.paper_id == "paper-broken":
             raise RuntimeError("synthetic judge failure for paper-broken")
         return super().judge(query=query, paper=paper)
+
+
+class FailingQueryRewriter:
+    def rewrite(self, mode: str, user_query: str, memory_context: str = "") -> list[str]:
+        raise RuntimeError("query rewrite provider unavailable")
+
+
+class RankFailingJudge(FakeJudge):
+    def sort_by_final_score(self, results: list[JudgeResult]) -> list[JudgeResult]:
+        raise RuntimeError("ranking failed")
 
 
 def test_basic_paper_discovery_graph_returns_ranked_candidates_without_persisting(tmp_path):
@@ -206,3 +219,62 @@ def test_paper_discovery_graph_keeps_other_candidates_when_one_judge_fails(tmp_p
         quality_score=0.0,
         novelty_score=0.85,
     )
+
+
+def test_paper_discovery_graph_classifies_query_rewrite_failure(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    graph = build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=FakeJudge(),
+        memory_store=store,
+        query_rewriter=FailingQueryRewriter(),
+    )
+
+    with pytest.raises(DiscoveryStageError) as exc_info:
+        graph.invoke(
+            {
+                "mode": "basic",
+                "user_query": "graph reconstruction",
+                "memory_context": "",
+                "rewritten_queries": [],
+                "raw_results": [],
+                "normalized_papers": [],
+                "deduped_papers": [],
+                "judge_results": [],
+                "ranked_candidates": [],
+            }
+        )
+
+    assert exc_info.value.stage == "query_rewrite"
+    assert exc_info.value.detail == "query rewrite provider unavailable"
+    assert exc_info.value.recoverable is True
+
+
+def test_paper_discovery_graph_classifies_rank_failure(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    graph = build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=RankFailingJudge(),
+        memory_store=store,
+    )
+
+    with pytest.raises(DiscoveryStageError) as exc_info:
+        graph.invoke(
+            {
+                "mode": "basic",
+                "user_query": "graph reconstruction",
+                "memory_context": "",
+                "rewritten_queries": [],
+                "raw_results": [],
+                "normalized_papers": [],
+                "deduped_papers": [],
+                "judge_results": [],
+                "ranked_candidates": [],
+            }
+        )
+
+    assert exc_info.value.stage == "rank"
+    assert exc_info.value.detail == "ranking failed"
+    assert exc_info.value.recoverable is False

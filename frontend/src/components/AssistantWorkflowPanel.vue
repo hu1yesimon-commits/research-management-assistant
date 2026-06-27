@@ -93,7 +93,7 @@
       </div>
       <ul class="stack-list">
         <li v-for="(workflowError, errorIndex) in response.errors" :key="errorIndex" class="source-card">
-          <strong>{{ workflowError.section || "workflow" }}:</strong> {{ workflowError.message }}
+          <strong>{{ workflowError.stage || workflowError.section || "workflow" }}:</strong> {{ workflowError.message }}
         </li>
       </ul>
     </div>

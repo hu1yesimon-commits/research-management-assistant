@@ -1,3 +1,7 @@
+import pytest
+
+from graph.errors import DiscoveryStageError
+from services.idea_service import IdeaServiceError
 from services.qa_service import QAServiceError
 from services.retrieval_service import RetrievalServiceError
 from services.research_assistant_workflow import ResearchAssistantWorkflowError, ResearchAssistantWorkflowService
@@ -101,7 +105,8 @@ class FakeKnowledgeQAService:
 
 
 class FakeIdeaService:
-    def __init__(self):
+    def __init__(self, error: IdeaServiceError | None = None):
+        self.error = error
         self.calls = []
 
     def recommend(
@@ -113,6 +118,8 @@ class FakeIdeaService:
         idea_count: int = 3,
     ) -> IdeaRecommendResponse:
         self.calls.append((experiment_log, save_log, include_discovery, top_k, idea_count))
+        if self.error is not None:
+            raise self.error
         return IdeaRecommendResponse(
             log_id=1 if save_log else None,
             query=" ".join([experiment_log.task, experiment_log.goal]),
@@ -269,7 +276,9 @@ def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery
     knowledge = FakeKnowledgeQAService()
     service = build_service(
         store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
-        discovery_graph=FakeDiscoveryGraph(error=RuntimeError("discovery offline")),
+        discovery_graph=FakeDiscoveryGraph(
+            error=DiscoveryStageError("multi_search", "discovery offline", recoverable=True)
+        ),
         knowledge_service=knowledge,
     )
 
@@ -283,6 +292,16 @@ def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery
     assert response.errors[0].recoverable is True
     assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
     assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
+
+
+def test_search_intent_propagates_unknown_discovery_failure():
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        discovery_graph=FakeDiscoveryGraph(error=RuntimeError("unexpected discovery defect")),
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected discovery defect"):
+        service.query(query="graph reconstruction precision", intent="search", top_k=5)
 
 
 def test_search_intent_calls_answer_once_when_route_consumes_knowledge():
@@ -352,3 +371,47 @@ def test_research_intent_routes_to_idea_service():
     assert response.ideas[0].title == "Try calibrated retrieval"
     assert len(idea_service.calls) == 1
     assert knowledge.answer_calls == []
+
+
+def test_research_intent_maps_client_idea_failure_to_nonrecoverable_result():
+    service = build_service(
+        idea_service=FakeIdeaService(error=IdeaServiceError("invalid experiment log", status_code=400))
+    )
+
+    response = service.query(
+        query="graph reconstruction precision",
+        intent="research",
+        experiment_log=make_log(),
+    )
+
+    assert response.ideas == []
+    assert response.discovery.enabled is False
+    assert response.knowledge.enabled is False
+    assert response.discovery_result.enabled is False
+    assert response.knowledge_result.enabled is False
+    assert response.idea_result.enabled is True
+    assert response.idea_result.error == "invalid experiment log"
+    assert response.errors[0].stage == "idea_generation"
+    assert response.errors[0].recoverable is False
+
+
+def test_research_intent_maps_server_idea_failure_to_recoverable_result():
+    service = build_service(
+        idea_service=FakeIdeaService(error=IdeaServiceError("idea provider unavailable", status_code=502))
+    )
+
+    response = service.query(
+        query="graph reconstruction precision",
+        intent="research",
+        experiment_log=make_log(),
+    )
+
+    assert response.ideas == []
+    assert response.discovery.enabled is False
+    assert response.knowledge.enabled is False
+    assert response.discovery_result.enabled is False
+    assert response.knowledge_result.enabled is False
+    assert response.idea_result.enabled is True
+    assert response.idea_result.error == "idea provider unavailable"
+    assert response.errors[0].stage == "idea_generation"
+    assert response.errors[0].recoverable is True
