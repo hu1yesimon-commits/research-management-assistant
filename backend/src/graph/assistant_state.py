@@ -24,6 +24,9 @@ class ResearchAssistantState(TypedDict):
     discovery: dict
     knowledge: dict
     ideas: list[dict]
+    discovery_result: dict
+    knowledge_result: dict
+    idea_result: dict
     assistant_message: str
     next_action: dict | None
     suggested_user_actions: list[str]

@@ -233,6 +233,26 @@ def test_auto_high_coverage_routes_to_advanced_ready_without_running_discovery()
     assert response.next_action.type == "choose_intent"
 
 
+def test_assistant_response_initializes_v1_result_fields_alongside_legacy_fields():
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        knowledge_service=FakeKnowledgeQAService(),
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="search", top_k=2)
+
+    assert response.discovery.enabled is True
+    assert response.knowledge.enabled is True
+    assert response.discovery_result.enabled is False
+    assert response.knowledge_result.enabled is False
+    assert response.idea_result.enabled is False
+    assert {
+        "discovery_result",
+        "knowledge_result",
+        "idea_result",
+    } <= response.model_fields_set
+
+
 def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery_failure():
     knowledge = FakeKnowledgeQAService()
     service = build_service(

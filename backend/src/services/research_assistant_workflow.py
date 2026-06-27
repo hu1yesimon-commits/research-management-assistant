@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 from graph.builder import build_research_assistant_graph
 from services.schemas import (
+    DiscoveryResult,
     ExperimentLogRequest,
+    IdeaResult,
+    KnowledgeResult,
     ResearchAssistantError,
     ResearchAssistantNextAction,
     ResearchAssistantResponse,
@@ -66,6 +69,9 @@ class ResearchAssistantWorkflowService:
                 "discovery": ResearchDiscoverySection(enabled=False).model_dump(),
                 "knowledge": ResearchKnowledgeSection(enabled=False).model_dump(),
                 "ideas": [],
+                "discovery_result": DiscoveryResult(enabled=False).model_dump(),
+                "knowledge_result": KnowledgeResult(enabled=False).model_dump(),
+                "idea_result": IdeaResult(enabled=False).model_dump(),
                 "assistant_message": "",
                 "next_action": None,
                 "suggested_user_actions": [],
@@ -90,5 +96,8 @@ class ResearchAssistantWorkflowService:
             discovery=ResearchDiscoverySection(**result["discovery"]),
             knowledge=ResearchKnowledgeSection(**result["knowledge"]),
             ideas=result["ideas"],
+            discovery_result=DiscoveryResult(**result["discovery_result"]),
+            knowledge_result=KnowledgeResult(**result["knowledge_result"]),
+            idea_result=IdeaResult(**result["idea_result"]),
             errors=[ResearchAssistantError(**error) for error in result["errors"]],
         )
