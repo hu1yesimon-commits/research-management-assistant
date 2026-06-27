@@ -19,7 +19,7 @@ def make_nodes(
 ):
     def load_memory_context(state: PaperDiscoveryState) -> dict:
         supplied_snapshot = state.get("memory_context", "")
-        if supplied_snapshot:
+        if state.get("memory_context_is_snapshot", False) or supplied_snapshot:
             return {"memory_context": supplied_snapshot}
         return {"memory_context": memory_store.build_memory_context()}
 

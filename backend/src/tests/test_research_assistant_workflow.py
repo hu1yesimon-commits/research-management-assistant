@@ -64,6 +64,14 @@ class FakeDiscoveryGraph:
         }
 
 
+class RankedOnlyDiscoveryGraph:
+    def __init__(self, ranked_candidates: list[dict]):
+        self.ranked_candidates = ranked_candidates
+
+    def invoke(self, state: dict) -> dict:
+        return {"ranked_candidates": self.ranked_candidates}
+
+
 class FakeRetrievalService:
     def __init__(self, response: KnowledgeAnswerResponse, error: Exception | None = None):
         self.response = response
@@ -339,6 +347,20 @@ def test_search_intent_passes_exact_assistant_memory_snapshot_to_discovery():
     service.query(query="graph reconstruction precision", intent="search", top_k=2)
 
     assert discovery.calls[0]["memory_context"] == memory_snapshot
+    assert discovery.calls[0]["memory_context_is_snapshot"] is True
+
+
+def test_search_intent_marks_empty_assistant_memory_as_authoritative_snapshot():
+    discovery = FakeDiscoveryGraph()
+    service = build_service(
+        store=FakeStore(""),
+        discovery_graph=discovery,
+    )
+
+    service.query(query="graph reconstruction", intent="search", top_k=1)
+
+    assert discovery.calls[0]["memory_context"] == ""
+    assert discovery.calls[0]["memory_context_is_snapshot"] is True
 
 
 def test_search_intent_reports_full_discovery_counts_but_exposes_only_top_k():
@@ -368,6 +390,24 @@ def test_search_intent_reports_full_discovery_counts_but_exposes_only_top_k():
     assert "raw_results" not in response.model_dump()
 
 
+def test_search_intent_accepts_ranked_only_custom_discovery_graph():
+    ranked_candidates = [
+        {"paper": {"paper_id": "d1", "title": "First Discovery Paper"}},
+        {"paper": {"paper_id": "d2", "title": "Second Discovery Paper"}},
+    ]
+    service = build_service(
+        discovery_graph=RankedOnlyDiscoveryGraph(ranked_candidates),
+    )
+
+    response = service.query(query="graph reconstruction", intent="search", top_k=1)
+
+    assert response.discovery_result.top_k == ranked_candidates[:1]
+    assert response.discovery_result.rewritten_queries == []
+    assert response.discovery_result.total_raw == 0
+    assert response.discovery_result.total_deduped == 0
+    assert response.discovery_result.scoring_summary == {"ranked_count": 2}
+
+
 def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery_failure():
     knowledge = FakeKnowledgeQAService()
     service = build_service(
@@ -383,6 +423,11 @@ def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery
     assert response.mode == "advanced"
     assert response.route == "advanced_search"
     assert response.discovery.error == "discovery offline"
+    assert response.discovery_result.error == "discovery offline"
+    assert response.discovery_result.rewritten_queries == []
+    assert response.discovery_result.total_raw == 0
+    assert response.discovery_result.total_deduped == 0
+    assert response.discovery_result.scoring_summary == {"ranked_count": 0}
     assert response.knowledge.answer == "Knowledge answer"
     assert response.errors[0].stage == "multi_search"
     assert response.errors[0].recoverable is True

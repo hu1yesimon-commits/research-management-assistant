@@ -196,6 +196,48 @@ def test_paper_discovery_graph_preserves_supplied_memory_snapshot(tmp_path):
     assert rewriter.memory_contexts == [supplied_snapshot]
 
 
+def test_paper_discovery_graph_preserves_authoritative_empty_memory_snapshot(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.add_experiment_log_entry(
+        {
+            "task": "store context",
+            "model": "store model",
+            "dataset": "store dataset",
+            "metric_problem": "store metric",
+            "tried_methods": [],
+            "observation": "store observation",
+            "goal": "store goal",
+            "tags": ["store"],
+        }
+    )
+    rewriter = RecordingQueryRewriter()
+    graph = build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=FakeJudge(),
+        memory_store=store,
+        query_rewriter=rewriter,
+    )
+
+    result = graph.invoke(
+        {
+            "mode": "advanced",
+            "user_query": "graph reconstruction",
+            "memory_context": "",
+            "memory_context_is_snapshot": True,
+            "rewritten_queries": [],
+            "raw_results": [],
+            "normalized_papers": [],
+            "deduped_papers": [],
+            "judge_results": [],
+            "ranked_candidates": [],
+        }
+    )
+
+    assert result["memory_context"] == ""
+    assert rewriter.memory_contexts == [""]
+
+
 def test_paper_discovery_graph_keeps_other_candidates_when_one_judge_fails(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()

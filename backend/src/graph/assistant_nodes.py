@@ -268,6 +268,7 @@ def _run_discovery(
                 "mode": state["mode"],
                 "user_query": state["query"],
                 "memory_context": state["memory_context"],
+                "memory_context_is_snapshot": True,
                 "rewritten_queries": [],
                 "raw_results": [],
                 "normalized_papers": [],
@@ -282,9 +283,9 @@ def _run_discovery(
             candidates=ranked_candidates[: state["top_k"]],
             error=None,
         ), [], {
-            "rewritten_queries": result["rewritten_queries"],
-            "total_raw": len(result["raw_results"]),
-            "total_deduped": len(result["deduped_papers"]),
+            "rewritten_queries": result.get("rewritten_queries", []),
+            "total_raw": len(result.get("raw_results", [])),
+            "total_deduped": len(result.get("deduped_papers", [])),
             "ranked_count": len(ranked_candidates),
         }
     except DiscoveryStageError as exc:
