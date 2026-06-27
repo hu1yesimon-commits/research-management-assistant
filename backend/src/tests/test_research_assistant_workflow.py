@@ -260,12 +260,48 @@ def test_auto_high_coverage_routes_to_advanced_ready_without_running_discovery()
     assert response.mode == "advanced"
     assert response.route == "advanced_ready"
     assert response.discovery.enabled is False
-    assert response.knowledge.enabled is False
+    assert response.knowledge.enabled is True
+    assert response.knowledge.answer == "Knowledge answer"
+    assert response.discovery_result.enabled is False
+    assert response.knowledge_result.enabled is True
+    assert response.knowledge_result.answer == response.knowledge.answer
+    assert response.idea_result.enabled is False
     assert discovery.calls == []
     assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
-    assert knowledge.answer_calls == []
+    assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
     assert response.next_action is not None
-    assert response.next_action.type == "choose_intent"
+    assert response.next_action.type == "choose_path"
+    assert response.next_action.options[0].id == "continue_search"
+    assert response.next_action.options[0].request_patch == {"intent": "search"}
+    assert response.next_action.options[1].id == "submit_experiment_log"
+    assert response.next_action.options[1].request_patch == {"intent": "research"}
+
+
+def test_advanced_ready_returns_no_source_fallback_when_qa_has_no_sources():
+    knowledge = FakeKnowledgeQAService(
+        response=KnowledgeAnswerResponse(
+            question="graph reconstruction precision",
+            answer="No relevant knowledge chunks were found.",
+            sources=[],
+            mode="deterministic",
+        )
+    )
+    service = build_service(
+        store=FakeStore(
+            "Confirmed semantic memory: graph reconstruction precision\n"
+            "Recent episodic memory: graph reconstruction precision"
+        ),
+        knowledge_service=knowledge,
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="auto", top_k=5)
+
+    assert response.route == "advanced_ready"
+    assert response.knowledge.enabled is True
+    assert response.knowledge.sources == []
+    assert "could not find grounded local sources" in response.assistant_message.lower()
+    assert response.next_action is not None
+    assert response.next_action.type == "choose_path"
 
 
 def test_experiment_log_triggers_research_idea_even_when_intent_is_auto():

@@ -103,25 +103,49 @@ def make_research_assistant_nodes(
         }
 
     def run_advanced_ready(state: dict) -> dict:
+        knowledge, knowledge_errors = _knowledge_from_state_or_service(
+            knowledge_qa_service,
+            state,
+            enabled=True,
+        )
+        if knowledge.sources:
+            assistant_message = (
+                "I found grounded local knowledge for this query and returned an answer. "
+                "You can continue with paper search or submit a new experiment log for idea recommendations."
+            )
+        else:
+            assistant_message = (
+                "This query matches your existing research context, but I could not find grounded local sources "
+                "for a reliable answer. You can continue with paper search or submit a new experiment log."
+            )
         return {
             "discovery": ResearchDiscoverySection(enabled=False).model_dump(),
-            "knowledge": ResearchKnowledgeSection(enabled=False).model_dump(),
+            "knowledge": knowledge.model_dump(),
             "discovery_result": DiscoveryResult(enabled=False).model_dump(),
-            "knowledge_result": KnowledgeResult(enabled=False).model_dump(),
+            "knowledge_result": _knowledge_result_from_section(knowledge).model_dump(),
             "idea_result": _empty_idea_result().model_dump(),
-            "assistant_message": (
-                "This query appears related to your existing research context. Do you have a new "
-                "experiment log to analyze, or should I continue with contextual search?"
-            ),
+            "assistant_message": assistant_message,
             "next_action": {
-                "type": "choose_intent",
-                "options": ["research", "search"],
-                "message": "Choose research if you have a structured experiment log; choose search for contextual papers and answers.",
+                "type": "choose_path",
+                "options": [
+                    {
+                        "id": "continue_search",
+                        "label": "Search papers",
+                        "request_patch": {"intent": "search"},
+                    },
+                    {
+                        "id": "submit_experiment_log",
+                        "label": "Submit experiment log",
+                        "request_patch": {"intent": "research"},
+                    },
+                ],
+                "message": "Choose the next workflow step.",
             },
             "suggested_user_actions": [
+                "Continue with search for contextual paper recommendations.",
                 "Submit a structured experiment log for idea recommendations.",
-                "Continue with search for contextual paper recommendations and knowledge-base answers.",
             ],
+            "errors": state["errors"] + knowledge_errors,
         }
 
     def run_advanced_search(state: dict) -> dict:
