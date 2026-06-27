@@ -320,9 +320,8 @@ class ResearchAssistantNextAction(BaseModel):
     message: str | None = None
 
 
-class ResearchAssistantError(BaseModel):
-    section: Literal["coverage", "discovery", "knowledge", "idea", "routing"]
-    message: str
+class ResearchAssistantError(AssistantStageError):
+    pass
 
 
 class ResearchAssistantRequest(BaseModel):

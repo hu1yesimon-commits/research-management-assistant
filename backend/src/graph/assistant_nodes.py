@@ -4,7 +4,13 @@ from services.coverage import calculate_coverage_score
 from services.idea_service import IdeaServiceError
 from services.qa_service import QAServiceError
 from services.retrieval_service import RetrievalServiceError
-from services.schemas import ResearchDiscoverySection, ResearchKnowledgeSection
+from services.schemas import (
+    DiscoveryResult,
+    IdeaResult,
+    KnowledgeResult,
+    ResearchDiscoverySection,
+    ResearchKnowledgeSection,
+)
 
 
 ADVANCED_THRESHOLD = 0.5
@@ -26,7 +32,7 @@ def make_research_assistant_nodes(
             has_sources = bool(retrieval_response.results)
         except RetrievalServiceError as exc:
             has_sources = False
-            errors = errors + [{"section": "coverage", "message": exc.detail}]
+            errors = errors + [_stage_error("coverage", exc.detail)]
         score, reason = calculate_coverage_score(
             query=state["query"],
             semantic_memory_text=_semantic_memory_text(state["memory_context"]),
@@ -57,6 +63,9 @@ def make_research_assistant_nodes(
         return {
             "discovery": discovery.model_dump(),
             "knowledge": knowledge.model_dump(),
+            "discovery_result": _discovery_result_from_section(discovery).model_dump(),
+            "knowledge_result": _knowledge_result_from_section(knowledge).model_dump(),
+            "idea_result": _empty_idea_result().model_dump(),
             "assistant_message": (
                 "This looks like a new or lightly covered research area. I recommended top papers "
                 "and checked the local knowledge base. Select useful candidates and upload PDFs to "
@@ -79,6 +88,9 @@ def make_research_assistant_nodes(
         return {
             "discovery": ResearchDiscoverySection(enabled=False).model_dump(),
             "knowledge": ResearchKnowledgeSection(enabled=False).model_dump(),
+            "discovery_result": DiscoveryResult(enabled=False).model_dump(),
+            "knowledge_result": KnowledgeResult(enabled=False).model_dump(),
+            "idea_result": _empty_idea_result().model_dump(),
             "assistant_message": (
                 "This query appears related to your existing research context. Do you have a new "
                 "experiment log to analyze, or should I continue with contextual search?"
@@ -101,6 +113,9 @@ def make_research_assistant_nodes(
         return {
             "discovery": discovery.model_dump(),
             "knowledge": knowledge.model_dump(),
+            "discovery_result": _discovery_result_from_section(discovery).model_dump(),
+            "knowledge_result": _knowledge_result_from_section(knowledge).model_dump(),
+            "idea_result": _empty_idea_result().model_dump(),
             "assistant_message": (
                 "I used your existing research context to run contextual discovery and local knowledge answering."
             ),
@@ -121,7 +136,14 @@ def make_research_assistant_nodes(
         experiment_log = state["experiment_log"]
         if experiment_log is None:
             return {
-                "errors": state["errors"] + [{"section": "idea", "message": "experiment_log is required for research intent"}]
+                "errors": state["errors"]
+                + [
+                    _stage_error(
+                        "idea_generation",
+                        "experiment_log is required for research intent",
+                        recoverable=False,
+                    )
+                ]
             }
         try:
             response = idea_service.recommend(
@@ -135,22 +157,37 @@ def make_research_assistant_nodes(
             return {
                 "ideas": [],
                 "assistant_message": "I could not generate idea recommendations from this experiment log.",
-                "errors": state["errors"] + [{"section": "idea", "message": exc.detail}],
+                "errors": state["errors"] + [_stage_error("idea_generation", exc.detail)],
             }
+        discovery = ResearchDiscoverySection(
+            enabled=response.discovery.enabled,
+            candidates=response.discovery.candidates,
+            error=response.discovery.error,
+        )
+        knowledge = ResearchKnowledgeSection(
+            enabled=True,
+            answer=None,
+            sources=response.knowledge.sources,
+            error=response.knowledge.error,
+            mode=response.mode,
+        )
         return {
-            "discovery": ResearchDiscoverySection(
-                enabled=response.discovery.enabled,
-                candidates=response.discovery.candidates,
-                error=response.discovery.error,
-            ).model_dump(),
-            "knowledge": ResearchKnowledgeSection(
-                enabled=True,
-                answer=None,
-                sources=response.knowledge.sources,
-                error=response.knowledge.error,
-                mode=response.mode,
-            ).model_dump(),
+            "discovery": discovery.model_dump(),
+            "knowledge": knowledge.model_dump(),
             "ideas": [idea.model_dump() for idea in response.ideas],
+            "discovery_result": _discovery_result_from_section(discovery).model_dump(),
+            "knowledge_result": _knowledge_result_from_section(knowledge).model_dump(),
+            "idea_result": IdeaResult(
+                enabled=True,
+                ideas=response.ideas,
+                supporting_evidence=[
+                    evidence
+                    for idea in response.ideas
+                    for evidence in idea.supporting_evidence
+                ],
+                log_id=response.log_id,
+                error=None,
+            ).model_dump(),
             "assistant_message": "I generated idea options from your experiment log, memory context, and available evidence.",
             "next_action": {
                 "type": "select_idea",
@@ -208,7 +245,7 @@ def _run_discovery(discovery_graph, state: dict, enabled: bool) -> tuple[Researc
     except Exception as exc:
         message = str(exc)
         return ResearchDiscoverySection(enabled=True, candidates=[], error=message), [
-            {"section": "discovery", "message": message}
+            _stage_error("multi_search", message)
         ]
 
 
@@ -220,7 +257,7 @@ def _run_knowledge(knowledge_qa_service, state: dict, enabled: bool) -> tuple[Re
         return _knowledge_section(enabled=True, response=response), []
     except QAServiceError as exc:
         return ResearchKnowledgeSection(enabled=True, answer=None, sources=[], error=exc.detail, mode=None), [
-            {"section": "knowledge", "message": exc.detail}
+            _stage_error("knowledge_answer", exc.detail)
         ]
 
 
@@ -233,7 +270,7 @@ def _knowledge_from_state_or_service(
     if cached_knowledge and (cached_knowledge.get("answer") is not None or cached_knowledge.get("error") is not None):
         knowledge = ResearchKnowledgeSection(**{**cached_knowledge, "enabled": enabled})
         if knowledge.error is not None and enabled:
-            return knowledge, [{"section": "knowledge", "message": knowledge.error}]
+            return knowledge, [_stage_error("knowledge_answer", knowledge.error)]
         return knowledge, []
     return _run_knowledge(knowledge_qa_service, state, enabled=enabled)
 
@@ -246,6 +283,43 @@ def _knowledge_section(enabled: bool, response) -> ResearchKnowledgeSection:
         error=None,
         mode=response.mode,
     )
+
+
+def _stage_error(stage: str, message: str, recoverable: bool = True) -> dict:
+    return {"stage": stage, "message": message, "recoverable": recoverable}
+
+
+def _discovery_result_from_section(
+    discovery: ResearchDiscoverySection,
+    rewritten_queries: list[str] | None = None,
+    total_raw: int = 0,
+    total_deduped: int = 0,
+    ranked_count: int | None = None,
+) -> DiscoveryResult:
+    candidates = discovery.candidates
+    return DiscoveryResult(
+        enabled=discovery.enabled,
+        top_k=candidates,
+        rewritten_queries=rewritten_queries or [],
+        total_raw=total_raw,
+        total_deduped=total_deduped,
+        scoring_summary={"ranked_count": ranked_count if ranked_count is not None else len(candidates)},
+        error=discovery.error,
+    )
+
+
+def _knowledge_result_from_section(knowledge: ResearchKnowledgeSection) -> KnowledgeResult:
+    return KnowledgeResult(
+        enabled=knowledge.enabled,
+        answer=knowledge.answer,
+        sources=knowledge.sources,
+        mode=knowledge.mode,
+        error=knowledge.error,
+    )
+
+
+def _empty_idea_result() -> IdeaResult:
+    return IdeaResult(enabled=False)
 
 
 def _semantic_memory_text(memory_context: str) -> str:

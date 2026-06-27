@@ -243,14 +243,26 @@ def test_assistant_response_initializes_v1_result_fields_alongside_legacy_fields
 
     assert response.discovery.enabled is True
     assert response.knowledge.enabled is True
-    assert response.discovery_result.enabled is False
-    assert response.knowledge_result.enabled is False
-    assert response.idea_result.enabled is False
     assert {
         "discovery_result",
         "knowledge_result",
         "idea_result",
     } <= response.model_fields_set
+
+
+def test_search_intent_maps_legacy_sections_into_v1_result_fields():
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        knowledge_service=FakeKnowledgeQAService(),
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="search", top_k=2)
+
+    assert response.discovery_result.enabled is True
+    assert response.knowledge_result.enabled is True
+    assert response.idea_result.enabled is False
+    assert response.discovery_result.top_k == response.discovery.candidates
+    assert response.knowledge_result.answer == response.knowledge.answer
 
 
 def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery_failure():
@@ -267,7 +279,8 @@ def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery
     assert response.route == "advanced_search"
     assert response.discovery.error == "discovery offline"
     assert response.knowledge.answer == "Knowledge answer"
-    assert response.errors[0].section == "discovery"
+    assert response.errors[0].stage == "multi_search"
+    assert response.errors[0].recoverable is True
     assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
     assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
 
@@ -284,7 +297,8 @@ def test_search_intent_calls_answer_once_when_route_consumes_knowledge():
     assert response.route == "advanced_search"
     assert response.knowledge.enabled is True
     assert response.knowledge.error == "knowledge offline"
-    assert response.errors[0].section == "knowledge"
+    assert response.errors[0].stage == "knowledge_answer"
+    assert response.errors[0].recoverable is True
     assert response.errors[0].message == "knowledge offline"
     assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
     assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
@@ -303,7 +317,8 @@ def test_auto_coverage_retrieval_failure_routes_to_basic_explore_with_coverage_e
 
     assert response.mode == "basic"
     assert response.route == "basic_explore"
-    assert response.errors[0].section == "coverage"
+    assert response.errors[0].stage == "coverage"
+    assert response.errors[0].recoverable is True
     assert response.errors[0].message == "knowledge retrieval failed: vector backend unavailable"
     assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
     assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
