@@ -1,5 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Literal
 
 class PaperId(BaseModel):
@@ -321,7 +321,25 @@ class ResearchAssistantNextAction(BaseModel):
 
 
 class ResearchAssistantError(AssistantStageError):
-    pass
+    section: Literal["coverage", "discovery", "knowledge", "idea", "routing"] | None = None
+
+    @model_validator(mode="after")
+    def populate_legacy_section(self):
+        if self.section is not None:
+            return self
+        stage_to_section = {
+            "coverage": "coverage",
+            "query_rewrite": "discovery",
+            "multi_search": "discovery",
+            "postprocess": "discovery",
+            "llm_judge": "discovery",
+            "rank": "discovery",
+            "knowledge_answer": "knowledge",
+            "idea_generation": "idea",
+            "routing": "routing",
+        }
+        self.section = stage_to_section[self.stage]
+        return self
 
 
 class ResearchAssistantRequest(BaseModel):

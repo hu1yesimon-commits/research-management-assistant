@@ -314,6 +314,7 @@ def _run_discovery(
         "total_raw": 0,
         "total_deduped": 0,
         "ranked_count": 0,
+        "judge_failures": [],
     }
     if not enabled:
         return ResearchDiscoverySection(enabled=False), [], empty_metadata
@@ -329,19 +330,30 @@ def _run_discovery(
                 "normalized_papers": [],
                 "deduped_papers": [],
                 "judge_results": [],
+                "judge_failures": [],
                 "ranked_candidates": [],
             }
         )
         ranked_candidates = result["ranked_candidates"]
+        judge_failures = result.get("judge_failures", [])
+        errors = []
+        if judge_failures:
+            errors.append(
+                _stage_error(
+                    "llm_judge",
+                    f"LLM judge degraded for {len(judge_failures)} candidate(s): {judge_failures[0]}",
+                )
+            )
         return ResearchDiscoverySection(
             enabled=True,
             candidates=ranked_candidates[: state["top_k"]],
             error=None,
-        ), [], {
+        ), errors, {
             "rewritten_queries": result.get("rewritten_queries", []),
             "total_raw": len(result.get("raw_results", [])),
             "total_deduped": len(result.get("deduped_papers", [])),
             "ranked_count": len(ranked_candidates),
+            "judge_failures": judge_failures,
         }
     except DiscoveryStageError as exc:
         return ResearchDiscoverySection(enabled=True, candidates=[], error=exc.detail), [
@@ -405,6 +417,7 @@ def _discovery_result_from_section(
     total_raw: int = 0,
     total_deduped: int = 0,
     ranked_count: int | None = None,
+    judge_failures: list[str] | None = None,
 ) -> DiscoveryResult:
     candidates = discovery.candidates
     return DiscoveryResult(

@@ -18,6 +18,7 @@ class PaperDiscoveryState(TypedDict):
     normalized_papers: list[PaperMetadata]
     deduped_papers: list[PaperMetadata]
     judge_results: list[JudgeResult]
+    judge_failures: NotRequired[list[str]]
     ranked_candidates: list[RankedCandidate]
 
 

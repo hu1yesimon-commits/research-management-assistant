@@ -306,6 +306,9 @@ def test_paper_discovery_graph_keeps_other_candidates_when_one_judge_fails(tmp_p
     assert broken_candidate["judgement"].llm_relevance_score == 0.0
     assert broken_candidate["judgement"].quality_score == 0.0
     assert broken_candidate["judgement"].novelty_score == 0.85
+    assert result["judge_failures"] == [
+        "paper-broken: RuntimeError: synthetic judge failure for paper-broken"
+    ]
     assert broken_candidate["judgement"].final_score == ScoreUtils.calculate_final_score(
         llm_relevance_score=0.0,
         embedding_relevance_score=0.0,

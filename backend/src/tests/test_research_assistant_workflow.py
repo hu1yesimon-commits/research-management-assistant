@@ -39,12 +39,14 @@ class FakeDiscoveryGraph:
         rewritten_queries: list[str] | None = None,
         raw_results: list | None = None,
         deduped_papers: list | None = None,
+        judge_failures: list[str] | None = None,
     ):
         self.result = result if result is not None else [{"paper": {"paper_id": "d1", "title": "Discovery Paper"}}]
         self.error = error
         self.rewritten_queries = rewritten_queries
         self.raw_results = raw_results
         self.deduped_papers = deduped_papers
+        self.judge_failures = judge_failures
         self.calls: list[dict] = []
 
     def invoke(self, state: dict) -> dict:
@@ -60,6 +62,7 @@ class FakeDiscoveryGraph:
             "deduped_papers": (
                 self.deduped_papers if self.deduped_papers is not None else state["deduped_papers"]
             ),
+            "judge_failures": self.judge_failures if self.judge_failures is not None else state.get("judge_failures", []),
             "ranked_candidates": self.result,
         }
 
@@ -570,9 +573,37 @@ def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery
     assert response.discovery_result.scoring_summary == {"ranked_count": 0}
     assert response.knowledge.answer == "Knowledge answer"
     assert response.errors[0].stage == "multi_search"
+    assert response.errors[0].section == "discovery"
     assert response.errors[0].recoverable is True
     assert knowledge.retrieval_service.calls == [("graph reconstruction precision", 5)]
     assert knowledge.answer_calls == [("graph reconstruction precision", 5)]
+
+
+def test_search_intent_keeps_legacy_error_section_compatibility():
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        knowledge_service=FakeKnowledgeQAService(error=QAServiceError("knowledge offline")),
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="search", top_k=5)
+
+    assert response.errors[0].stage == "knowledge_answer"
+    assert response.errors[0].section == "knowledge"
+
+
+def test_search_intent_surfaces_llm_judge_stage_error_when_discovery_reports_judge_failures():
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        discovery_graph=FakeDiscoveryGraph(
+            judge_failures=["judge failed: RuntimeError: synthetic judge failure for paper-broken"]
+        ),
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="search", top_k=5)
+
+    assert response.route == "advanced_search"
+    assert any(error.stage == "llm_judge" for error in response.errors)
+    assert any(error.section == "discovery" for error in response.errors)
 
 
 def test_search_intent_propagates_unknown_discovery_failure():

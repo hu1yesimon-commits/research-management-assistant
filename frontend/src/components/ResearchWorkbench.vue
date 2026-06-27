@@ -26,6 +26,7 @@
     <AssistantWorkflowPanel
       :run-assistant="handleAssistant"
       @success="handleAssistantSuccess"
+      @failure="handleAssistantFailure"
     />
 
     <QueryForm :loading="queryLoading" @submit="handleQuery" />
@@ -185,6 +186,11 @@ function handleAssistant(payload) {
 function handleAssistantSuccess(response) {
   assistantResponse.value = response;
   activeResultSource.value = "assistant";
+}
+
+function handleAssistantFailure() {
+  assistantResponse.value = null;
+  activeResultSource.value = "query";
 }
 
 async function loadCandidates() {

@@ -1,8 +1,8 @@
 from typing import Literal
 
 
-DiscoveryStage = Literal["query_rewrite", "multi_search", "postprocess", "rank"]
-DISCOVERY_STAGES = frozenset({"query_rewrite", "multi_search", "postprocess", "rank"})
+DiscoveryStage = Literal["query_rewrite", "multi_search", "postprocess", "llm_judge", "rank"]
+DISCOVERY_STAGES = frozenset({"query_rewrite", "multi_search", "postprocess", "llm_judge", "rank"})
 
 
 class DiscoveryStageError(Exception):

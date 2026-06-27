@@ -135,4 +135,25 @@ describe("ResearchWorkbench result source switching", () => {
     expect(text).not.toContain("Assistant knowledge answer");
     expect(text).not.toContain("Assistant discovery paper");
   });
+
+  test("clears stale assistant results after a later assistant failure", async () => {
+    researchAssistant.mockResolvedValueOnce(assistantResponse).mockRejectedValueOnce(new Error("assistant offline"));
+    const wrapper = mount(ResearchWorkbench);
+
+    await wrapper.find("#assistant-query").setValue("assistant route");
+    await wrapper.find("form.assistant-form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Results source: assistant");
+    expect(wrapper.text()).toContain("Assistant knowledge answer");
+
+    await wrapper.find("#assistant-query").setValue("assistant route retry");
+    await wrapper.find("form.assistant-form").trigger("submit.prevent");
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(text).toContain("assistant offline");
+    expect(text).not.toContain("Assistant knowledge answer");
+    expect(text).not.toContain("Assistant discovery paper");
+  });
 });

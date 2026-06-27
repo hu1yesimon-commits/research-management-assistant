@@ -59,6 +59,7 @@ def make_nodes(
 
     def judge_papers(state: PaperDiscoveryState) -> dict:
         judge_results: list[JudgeResult] = []
+        judge_failures: list[str] = []
         for paper in state["deduped_papers"]:
             try:
                 result = judge.judge(query=state["user_query"], paper=paper)
@@ -69,6 +70,7 @@ def make_nodes(
                     paper=paper,
                 )
                 error_summary = _sanitize_judge_error(str(exc))
+                judge_failures.append(f"{paper.paper_id}: {type(exc).__name__}: {error_summary}")
                 result = JudgeResult(
                     decision="uncertain",
                     reason=f"judge failed: {type(exc).__name__}: {error_summary}",
@@ -86,7 +88,8 @@ def make_nodes(
                 )
             judge_results.append(result)
         return {
-            "judge_results": judge_results
+            "judge_results": judge_results,
+            "judge_failures": judge_failures,
         }
 
     def rank_papers(state: PaperDiscoveryState) -> dict:
