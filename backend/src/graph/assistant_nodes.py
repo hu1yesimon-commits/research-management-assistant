@@ -49,10 +49,24 @@ def make_research_assistant_nodes(
 
     def route_request(state: dict) -> dict:
         intent = state["intent"]
+        if state.get("experiment_log") is not None:
+            return {
+                "mode": "advanced",
+                "route": "research_idea",
+                "route_reason": "current request includes an experiment log",
+            }
         if intent == "research":
-            return {"mode": "advanced", "route": "research_idea"}
+            return {
+                "mode": "advanced",
+                "route": "research_idea",
+                "route_reason": "research intent requested idea generation",
+            }
         if intent == "search":
-            return {"mode": "advanced", "route": "advanced_search"}
+            return {
+                "mode": "advanced",
+                "route": "advanced_search",
+                "route_reason": "search intent requested contextual discovery and grounded QA",
+            }
         if state["coverage_score"] >= ADVANCED_THRESHOLD:
             return {"mode": "advanced", "route": "advanced_ready"}
         return {"mode": "basic", "route": "basic_explore"}

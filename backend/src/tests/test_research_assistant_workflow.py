@@ -240,6 +240,39 @@ def test_auto_high_coverage_routes_to_advanced_ready_without_running_discovery()
     assert response.next_action.type == "choose_intent"
 
 
+def test_experiment_log_triggers_research_idea_even_when_intent_is_auto():
+    idea_service = FakeIdeaService()
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        idea_service=idea_service,
+    )
+
+    response = service.query(
+        query="graph reconstruction precision",
+        intent="auto",
+        experiment_log=make_log(),
+    )
+
+    assert response.route == "research_idea"
+    assert len(idea_service.calls) == 1
+
+
+def test_stored_memory_log_does_not_trigger_research_idea_without_current_request_log():
+    idea_service = FakeIdeaService()
+    service = build_service(
+        store=FakeStore(
+            "Confirmed semantic memory: graph reconstruction precision\n"
+            "Recent episodic memory: task=graph reconstruction observation=precision drops"
+        ),
+        idea_service=idea_service,
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="auto")
+
+    assert response.route == "advanced_ready"
+    assert idea_service.calls == []
+
+
 def test_assistant_response_initializes_v1_result_fields_alongside_legacy_fields():
     service = build_service(
         store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
