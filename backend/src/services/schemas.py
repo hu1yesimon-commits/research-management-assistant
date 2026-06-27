@@ -316,7 +316,7 @@ class NextActionOption(BaseModel):
 
 class ResearchAssistantNextAction(BaseModel):
     type: Literal["choose_path", "choose_intent", "upload_pdf", "select_idea", "none"]
-    options: list[NextActionOption | str] = Field(default_factory=list)
+    options: list[NextActionOption] = Field(default_factory=list)
     message: str | None = None
 
 

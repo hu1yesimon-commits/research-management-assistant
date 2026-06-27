@@ -223,6 +223,38 @@ def test_assistant_v1_next_action_supports_structured_options():
     assert next_action.options[0].request_patch == {"intent": "search"}
 
 
+def test_next_action_normalization_accepts_legacy_string_options(monkeypatch):
+    class LegacyActionGraph:
+        def invoke(self, state):
+            return {
+                **state,
+                "next_action": {
+                    "type": "upload_pdf",
+                    "options": ["review_candidates", "upload_pdf"],
+                    "message": "Choose a next step.",
+                },
+            }
+
+    monkeypatch.setattr(
+        "services.research_assistant_workflow.build_research_assistant_graph",
+        lambda **_: LegacyActionGraph(),
+    )
+
+    next_action = build_service().query("legacy custom graph").next_action
+
+    assert next_action is not None
+    assert next_action.options[0] == NextActionOption(
+        id="review_candidates",
+        label="Review Candidates",
+        request_patch={},
+    )
+    assert next_action.options[1] == NextActionOption(
+        id="upload_pdf",
+        label="Upload Pdf",
+        request_patch={},
+    )
+
+
 def build_service(
     store: FakeStore | None = None,
     discovery_graph: FakeDiscoveryGraph | None = None,
@@ -258,6 +290,10 @@ def test_auto_low_coverage_routes_to_basic_explore():
     assert knowledge.answer_calls == [("brand new topic", 3)]
     assert response.next_action is not None
     assert response.next_action.type == "upload_pdf"
+    assert response.next_action.options[0].id == "review_candidates"
+    assert response.next_action.options[0].request_patch == {}
+    assert response.next_action.options[1].id == "upload_pdf"
+    assert response.next_action.options[1].request_patch == {}
 
 
 def test_auto_high_coverage_routes_to_advanced_ready_without_running_discovery():
@@ -382,6 +418,11 @@ def test_experiment_log_triggers_research_idea_even_when_intent_is_auto():
 
     assert response.route == "research_idea"
     assert len(idea_service.calls) == 1
+    assert response.next_action is not None
+    assert response.next_action.options[0].id == "select_idea"
+    assert response.next_action.options[0].request_patch == {}
+    assert response.next_action.options[1].id == "continue_search"
+    assert response.next_action.options[1].request_patch == {"intent": "search"}
 
 
 def test_stored_memory_log_does_not_trigger_research_idea_without_current_request_log():

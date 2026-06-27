@@ -95,7 +95,18 @@ def make_research_assistant_nodes(
             ),
             "next_action": {
                 "type": "upload_pdf",
-                "options": ["review_candidates", "upload_pdf"],
+                "options": [
+                    {
+                        "id": "review_candidates",
+                        "label": "Review candidates",
+                        "request_patch": {},
+                    },
+                    {
+                        "id": "upload_pdf",
+                        "label": "Upload PDF",
+                        "request_patch": {},
+                    },
+                ],
                 "message": "Review the recommended papers and upload PDFs for the ones you want to keep.",
             },
             "suggested_user_actions": [
@@ -253,7 +264,18 @@ def make_research_assistant_nodes(
             "assistant_message": "I generated idea options from your experiment log, memory context, and available evidence.",
             "next_action": {
                 "type": "select_idea",
-                "options": ["select_idea", "continue_search"],
+                "options": [
+                    {
+                        "id": "select_idea",
+                        "label": "Select idea",
+                        "request_patch": {},
+                    },
+                    {
+                        "id": "continue_search",
+                        "label": "Continue search",
+                        "request_patch": {"intent": "search"},
+                    },
+                ],
                 "message": "Choose one idea to explore further, or continue with contextual search.",
             },
             "suggested_user_actions": [

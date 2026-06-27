@@ -8,6 +8,7 @@ from services.schemas import (
     ExperimentLogRequest,
     IdeaResult,
     KnowledgeResult,
+    NextActionOption,
     ResearchAssistantError,
     ResearchAssistantNextAction,
     ResearchAssistantResponse,
@@ -88,11 +89,7 @@ class ResearchAssistantWorkflowService:
             coverage_score=result["coverage_score"],
             route_reason=result["route_reason"],
             assistant_message=result["assistant_message"],
-            next_action=(
-                ResearchAssistantNextAction(**result["next_action"])
-                if result.get("next_action") is not None
-                else None
-            ),
+            next_action=_normalize_next_action(result.get("next_action")),
             suggested_user_actions=result["suggested_user_actions"],
             discovery=ResearchDiscoverySection(**result["discovery"]),
             knowledge=ResearchKnowledgeSection(**result["knowledge"]),
@@ -102,3 +99,19 @@ class ResearchAssistantWorkflowService:
             idea_result=IdeaResult(**result["idea_result"]),
             errors=[ResearchAssistantError(**error) for error in result["errors"]],
         )
+
+
+def _normalize_next_action(action: dict | None) -> ResearchAssistantNextAction | None:
+    if action is None:
+        return None
+    options = [
+        NextActionOption(
+            id=option,
+            label=option.replace("_", " ").title(),
+            request_patch={},
+        )
+        if isinstance(option, str)
+        else NextActionOption(**option)
+        for option in action.get("options", [])
+    ]
+    return ResearchAssistantNextAction(**{**action, "options": options})
