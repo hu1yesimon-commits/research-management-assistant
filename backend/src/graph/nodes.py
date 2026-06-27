@@ -18,6 +18,9 @@ def make_nodes(
     query_rewriter: QueryRewriter,
 ):
     def load_memory_context(state: PaperDiscoveryState) -> dict:
+        supplied_snapshot = state.get("memory_context", "")
+        if supplied_snapshot:
+            return {"memory_context": supplied_snapshot}
         return {"memory_context": memory_store.build_memory_context()}
 
     def rewrite_query(state: PaperDiscoveryState) -> dict:

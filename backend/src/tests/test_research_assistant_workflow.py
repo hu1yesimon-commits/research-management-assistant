@@ -32,16 +32,36 @@ class FakeStore:
 
 
 class FakeDiscoveryGraph:
-    def __init__(self, result=None, error: Exception | None = None):
+    def __init__(
+        self,
+        result=None,
+        error: Exception | None = None,
+        rewritten_queries: list[str] | None = None,
+        raw_results: list | None = None,
+        deduped_papers: list | None = None,
+    ):
         self.result = result if result is not None else [{"paper": {"paper_id": "d1", "title": "Discovery Paper"}}]
         self.error = error
+        self.rewritten_queries = rewritten_queries
+        self.raw_results = raw_results
+        self.deduped_papers = deduped_papers
         self.calls: list[dict] = []
 
     def invoke(self, state: dict) -> dict:
         self.calls.append(state)
         if self.error is not None:
             raise self.error
-        return {**state, "ranked_candidates": self.result}
+        return {
+            **state,
+            "rewritten_queries": (
+                self.rewritten_queries if self.rewritten_queries is not None else state["rewritten_queries"]
+            ),
+            "raw_results": self.raw_results if self.raw_results is not None else state["raw_results"],
+            "deduped_papers": (
+                self.deduped_papers if self.deduped_papers is not None else state["deduped_papers"]
+            ),
+            "ranked_candidates": self.result,
+        }
 
 
 class FakeRetrievalService:
@@ -303,6 +323,49 @@ def test_search_intent_maps_legacy_sections_into_v1_result_fields():
     assert response.idea_result.enabled is False
     assert response.discovery_result.top_k == response.discovery.candidates
     assert response.knowledge_result.answer == response.knowledge.answer
+
+
+def test_search_intent_passes_exact_assistant_memory_snapshot_to_discovery():
+    memory_snapshot = (
+        "Confirmed semantic memory: prefers lightweight graph models\n"
+        "Recent episodic memory: observation=precision drops"
+    )
+    discovery = FakeDiscoveryGraph()
+    service = build_service(
+        store=FakeStore(memory_snapshot),
+        discovery_graph=discovery,
+    )
+
+    service.query(query="graph reconstruction precision", intent="search", top_k=2)
+
+    assert discovery.calls[0]["memory_context"] == memory_snapshot
+
+
+def test_search_intent_reports_full_discovery_counts_but_exposes_only_top_k():
+    ranked_candidates = [
+        {"paper": {"paper_id": "d1", "title": "First Discovery Paper"}},
+        {"paper": {"paper_id": "d2", "title": "Second Discovery Paper"}},
+    ]
+    discovery = FakeDiscoveryGraph(
+        result=ranked_candidates,
+        rewritten_queries=["graph reconstruction", "lightweight graph reconstruction"],
+        raw_results=[{"paper_id": "raw-1"}, {"paper_id": "raw-2"}, {"paper_id": "raw-3"}],
+        deduped_papers=[{"paper_id": "d1"}, {"paper_id": "d2"}],
+    )
+    service = build_service(discovery_graph=discovery)
+
+    response = service.query(query="graph reconstruction", intent="search", top_k=1)
+
+    assert response.discovery.candidates == ranked_candidates[:1]
+    assert response.discovery_result.top_k == ranked_candidates[:1]
+    assert response.discovery_result.rewritten_queries == [
+        "graph reconstruction",
+        "lightweight graph reconstruction",
+    ]
+    assert response.discovery_result.total_raw == 3
+    assert response.discovery_result.total_deduped == 2
+    assert response.discovery_result.scoring_summary == {"ranked_count": 2}
+    assert "raw_results" not in response.model_dump()
 
 
 def test_search_intent_routes_to_advanced_search_and_preserves_partial_discovery_failure():

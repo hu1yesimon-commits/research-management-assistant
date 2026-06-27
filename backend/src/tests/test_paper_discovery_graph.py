@@ -62,6 +62,15 @@ class FailingQueryRewriter:
         raise RuntimeError("query rewrite provider unavailable")
 
 
+class RecordingQueryRewriter:
+    def __init__(self):
+        self.memory_contexts: list[str] = []
+
+    def rewrite(self, mode: str, user_query: str, memory_context: str = "") -> list[str]:
+        self.memory_contexts.append(memory_context)
+        return [user_query]
+
+
 class RankFailingJudge(FakeJudge):
     def sort_by_final_score(self, results: list[JudgeResult]) -> list[JudgeResult]:
         raise RuntimeError("ranking failed")
@@ -143,6 +152,48 @@ def test_advanced_graph_uses_memory_context_for_rewritten_queries(tmp_path):
     assert "observation=need better interpretability while keeping the model light" in result["memory_context"]
     assert "graph reconstruction lightweight" in result["rewritten_queries"]
     assert "graph reconstruction interpretability" in result["rewritten_queries"]
+
+
+def test_paper_discovery_graph_preserves_supplied_memory_snapshot(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.add_experiment_log_entry(
+        {
+            "task": "store context",
+            "model": "store model",
+            "dataset": "store dataset",
+            "metric_problem": "store metric",
+            "tried_methods": [],
+            "observation": "store observation",
+            "goal": "store goal",
+            "tags": ["store"],
+        }
+    )
+    supplied_snapshot = "Confirmed semantic memory: supplied by assistant graph"
+    rewriter = RecordingQueryRewriter()
+    graph = build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=FakeJudge(),
+        memory_store=store,
+        query_rewriter=rewriter,
+    )
+
+    result = graph.invoke(
+        {
+            "mode": "advanced",
+            "user_query": "graph reconstruction",
+            "memory_context": supplied_snapshot,
+            "rewritten_queries": [],
+            "raw_results": [],
+            "normalized_papers": [],
+            "deduped_papers": [],
+            "judge_results": [],
+            "ranked_candidates": [],
+        }
+    )
+
+    assert result["memory_context"] == supplied_snapshot
+    assert rewriter.memory_contexts == [supplied_snapshot]
 
 
 def test_paper_discovery_graph_keeps_other_candidates_when_one_judge_fails(tmp_path):

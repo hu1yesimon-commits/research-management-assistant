@@ -72,13 +72,16 @@ def make_research_assistant_nodes(
         return {"mode": "basic", "route": "basic_explore"}
 
     def run_basic_explore(state: dict) -> dict:
-        discovery, errors = _run_discovery(discovery_graph, state, enabled=True)
+        discovery, errors, discovery_metadata = _run_discovery(discovery_graph, state, enabled=True)
         knowledge, knowledge_errors = _knowledge_from_state_or_service(knowledge_qa_service, state, enabled=True)
         errors.extend(knowledge_errors)
         return {
             "discovery": discovery.model_dump(),
             "knowledge": knowledge.model_dump(),
-            "discovery_result": _discovery_result_from_section(discovery).model_dump(),
+            "discovery_result": _discovery_result_from_section(
+                discovery,
+                **discovery_metadata,
+            ).model_dump(),
             "knowledge_result": _knowledge_result_from_section(knowledge).model_dump(),
             "idea_result": _empty_idea_result().model_dump(),
             "assistant_message": (
@@ -122,13 +125,16 @@ def make_research_assistant_nodes(
         }
 
     def run_advanced_search(state: dict) -> dict:
-        discovery, errors = _run_discovery(discovery_graph, state, enabled=True)
+        discovery, errors, discovery_metadata = _run_discovery(discovery_graph, state, enabled=True)
         knowledge, knowledge_errors = _knowledge_from_state_or_service(knowledge_qa_service, state, enabled=True)
         errors.extend(knowledge_errors)
         return {
             "discovery": discovery.model_dump(),
             "knowledge": knowledge.model_dump(),
-            "discovery_result": _discovery_result_from_section(discovery).model_dump(),
+            "discovery_result": _discovery_result_from_section(
+                discovery,
+                **discovery_metadata,
+            ).model_dump(),
             "knowledge_result": _knowledge_result_from_section(knowledge).model_dump(),
             "idea_result": _empty_idea_result().model_dump(),
             "assistant_message": (
@@ -243,15 +249,25 @@ def route_by_state(state: dict) -> str:
     return state["route"]
 
 
-def _run_discovery(discovery_graph, state: dict, enabled: bool) -> tuple[ResearchDiscoverySection, list[dict]]:
+def _run_discovery(
+    discovery_graph,
+    state: dict,
+    enabled: bool,
+) -> tuple[ResearchDiscoverySection, list[dict], dict]:
+    empty_metadata = {
+        "rewritten_queries": [],
+        "total_raw": 0,
+        "total_deduped": 0,
+        "ranked_count": 0,
+    }
     if not enabled:
-        return ResearchDiscoverySection(enabled=False), []
+        return ResearchDiscoverySection(enabled=False), [], empty_metadata
     try:
         result = discovery_graph.invoke(
             {
                 "mode": state["mode"],
                 "user_query": state["query"],
-                "memory_context": "",
+                "memory_context": state["memory_context"],
                 "rewritten_queries": [],
                 "raw_results": [],
                 "normalized_papers": [],
@@ -260,15 +276,21 @@ def _run_discovery(discovery_graph, state: dict, enabled: bool) -> tuple[Researc
                 "ranked_candidates": [],
             }
         )
+        ranked_candidates = result["ranked_candidates"]
         return ResearchDiscoverySection(
             enabled=True,
-            candidates=result["ranked_candidates"][: state["top_k"]],
+            candidates=ranked_candidates[: state["top_k"]],
             error=None,
-        ), []
+        ), [], {
+            "rewritten_queries": result["rewritten_queries"],
+            "total_raw": len(result["raw_results"]),
+            "total_deduped": len(result["deduped_papers"]),
+            "ranked_count": len(ranked_candidates),
+        }
     except DiscoveryStageError as exc:
         return ResearchDiscoverySection(enabled=True, candidates=[], error=exc.detail), [
             _stage_error(exc.stage, exc.detail, recoverable=exc.recoverable)
-        ]
+        ], empty_metadata
 
 
 def _run_knowledge(knowledge_qa_service, state: dict, enabled: bool) -> tuple[ResearchKnowledgeSection, list[dict]]:
