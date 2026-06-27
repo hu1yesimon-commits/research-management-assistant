@@ -2,7 +2,7 @@ import pytest
 
 from graph.errors import DiscoveryStageError
 from services.idea_service import IdeaServiceError
-from services.qa_service import QAServiceError
+from services.qa_service import KnowledgeQAService, QAServiceError
 from services.retrieval_service import RetrievalServiceError
 from services.research_assistant_workflow import ResearchAssistantWorkflowError, ResearchAssistantWorkflowService
 from services.schemas import (
@@ -125,11 +125,25 @@ class FakeKnowledgeQAService:
         self.retrieval_service = FakeRetrievalService(self.response, error=retrieval_error)
         self.answer_calls: list[tuple[str, int]] = []
 
-    def answer(self, question: str, top_k: int = 5) -> KnowledgeAnswerResponse:
+    def answer(
+        self,
+        question: str,
+        top_k: int = 5,
+        retrieved_results: list[KnowledgeSearchResult] | None = None,
+    ) -> KnowledgeAnswerResponse:
         self.answer_calls.append((question, top_k))
         if self.error is not None:
             raise self.error
         return self.response
+
+
+class TrackingGroundedAnswerGenerator:
+    def __init__(self):
+        self.calls: list[tuple[str, list[KnowledgeSearchResult]]] = []
+
+    def generate(self, question: str, retrieved_chunks: list[KnowledgeSearchResult]) -> str:
+        self.calls.append((question, retrieved_chunks))
+        return "Grounded cached answer"
 
 
 class FakeIdeaService:
@@ -302,6 +316,55 @@ def test_advanced_ready_returns_no_source_fallback_when_qa_has_no_sources():
     assert "could not find grounded local sources" in response.assistant_message.lower()
     assert response.next_action is not None
     assert response.next_action.type == "choose_path"
+
+
+def test_advanced_ready_reports_qa_outage_instead_of_no_sources():
+    knowledge = FakeKnowledgeQAService(error=QAServiceError("knowledge provider unavailable", status_code=502))
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        knowledge_service=knowledge,
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="auto", top_k=5)
+
+    assert response.route == "advanced_ready"
+    assert response.knowledge.enabled is True
+    assert response.knowledge.error == "knowledge provider unavailable"
+    assert response.errors[0].stage == "knowledge_answer"
+    assert "temporarily unavailable" in response.assistant_message.lower()
+    assert "could not find grounded local sources" not in response.assistant_message.lower()
+
+
+def test_advanced_ready_reuses_coverage_results_for_real_qa_service():
+    retrieval_response = KnowledgeAnswerResponse(
+        question="graph reconstruction precision",
+        answer="unused",
+        sources=[
+            KnowledgeAnswerSource(
+                paper_id="k1",
+                title="Knowledge Paper",
+                chunk_index=0,
+                distance=0.1,
+                text="embedded graph reconstruction chunk",
+                vector_ref="chroma:research_chunks:k1:0:hash",
+            )
+        ],
+        mode="deterministic",
+    )
+    retrieval = FakeRetrievalService(retrieval_response)
+    generator = TrackingGroundedAnswerGenerator()
+    knowledge = KnowledgeQAService(retrieval_service=retrieval, answer_generator=generator)
+    service = build_service(
+        store=FakeStore("Confirmed semantic memory: graph reconstruction precision"),
+        knowledge_service=knowledge,
+    )
+
+    response = service.query(query="graph reconstruction precision", intent="auto", top_k=5)
+
+    assert response.route == "advanced_ready"
+    assert response.knowledge.answer == "Grounded cached answer"
+    assert retrieval.calls == [("graph reconstruction precision", 5)]
+    assert len(generator.calls) == 1
 
 
 def test_experiment_log_triggers_research_idea_even_when_intent_is_auto():

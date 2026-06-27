@@ -165,7 +165,12 @@ class FakeKnowledgeQAService:
         )
         self.retrieval_service = FakeRetrievalService(self.response)
 
-    def answer(self, question: str, top_k: int = 5) -> KnowledgeAnswerResponse:
+    def answer(
+        self,
+        question: str,
+        top_k: int = 5,
+        retrieved_results: list[KnowledgeSearchResult] | None = None,
+    ) -> KnowledgeAnswerResponse:
         return self.response.model_copy(update={"question": question})
 
 

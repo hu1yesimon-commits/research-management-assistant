@@ -87,6 +87,34 @@ describe("AssistantWorkflowPanel", () => {
     expect(text).toContain("Run one baseline comparison.");
   });
 
+  test("renders structured next-action option labels", async () => {
+    const structuredResponse = {
+      ...assistantResponse,
+      next_action: {
+        type: "choose_path",
+        message: "Choose the next workflow step.",
+        options: [
+          {
+            id: "continue_search",
+            label: "Search papers",
+            request_patch: { intent: "search" },
+          },
+        ],
+      },
+    };
+    const wrapper = mountPanel({
+      props: {
+        runAssistant: vi.fn().mockResolvedValue(structuredResponse),
+      },
+    });
+
+    await wrapper.find("#assistant-query").setValue("local evidence");
+    await wrapper.find("form.assistant-form").trigger("submit.prevent");
+
+    expect(wrapper.text()).toContain("option: Search papers");
+    expect(wrapper.text()).not.toContain("[object Object]");
+  });
+
   test("renders endpoint errors without emitting success", async () => {
     const runAssistant = vi.fn().mockRejectedValue(new Error("assistant endpoint unavailable"));
     const wrapper = mountPanel({ props: { runAssistant } });

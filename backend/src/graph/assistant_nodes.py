@@ -9,6 +9,7 @@ from services.schemas import (
     DiscoveryResult,
     IdeaResult,
     KnowledgeResult,
+    KnowledgeSearchResult,
     ResearchDiscoverySection,
     ResearchKnowledgeSection,
 )
@@ -28,9 +29,11 @@ def make_research_assistant_nodes(
 
     def assess_query_coverage(state: dict) -> dict:
         errors = state["errors"]
+        coverage_retrieval_results = None
         try:
             retrieval_response = knowledge_qa_service.retrieval_service.search(state["query"], top_k=state["top_k"])
             has_sources = bool(retrieval_response.results)
+            coverage_retrieval_results = [result.model_dump() for result in retrieval_response.results]
         except RetrievalServiceError as exc:
             has_sources = False
             errors = errors + [_stage_error("coverage", exc.detail)]
@@ -43,6 +46,7 @@ def make_research_assistant_nodes(
         updates = {
             "coverage_score": score,
             "route_reason": reason,
+            "coverage_retrieval_results": coverage_retrieval_results,
             "errors": errors,
         }
         return updates
@@ -108,7 +112,12 @@ def make_research_assistant_nodes(
             state,
             enabled=True,
         )
-        if knowledge.sources:
+        if knowledge.error:
+            assistant_message = (
+                "The local knowledge answer service is temporarily unavailable. You can continue with paper "
+                "search or submit a new experiment log while the grounded answer is unavailable."
+            )
+        elif knowledge.sources:
             assistant_message = (
                 "I found grounded local knowledge for this query and returned an answer. "
                 "You can continue with paper search or submit a new experiment log for idea recommendations."
@@ -321,8 +330,18 @@ def _run_discovery(
 def _run_knowledge(knowledge_qa_service, state: dict, enabled: bool) -> tuple[ResearchKnowledgeSection, list[dict]]:
     if not enabled:
         return ResearchKnowledgeSection(enabled=False), []
+    cached_results = state.get("coverage_retrieval_results")
+    retrieved_results = (
+        None
+        if cached_results is None
+        else [KnowledgeSearchResult(**result) for result in cached_results]
+    )
     try:
-        response = knowledge_qa_service.answer(state["query"], top_k=state["top_k"])
+        response = knowledge_qa_service.answer(
+            state["query"],
+            top_k=state["top_k"],
+            retrieved_results=retrieved_results,
+        )
         return _knowledge_section(enabled=True, response=response), []
     except QAServiceError as exc:
         return ResearchKnowledgeSection(enabled=True, answer=None, sources=[], error=exc.detail, mode=None), [

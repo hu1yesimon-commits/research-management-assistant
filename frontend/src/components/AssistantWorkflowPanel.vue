@@ -72,7 +72,9 @@
       </div>
       <p class="text-block">{{ response.next_action.message }}</p>
       <div v-if="response.next_action.options?.length" class="kv-grid">
-        <span v-for="option in response.next_action.options" :key="option">option: {{ option }}</span>
+        <span v-for="option in response.next_action.options" :key="option.id || option">
+          option: {{ option.label || option }}
+        </span>
       </div>
     </div>
 

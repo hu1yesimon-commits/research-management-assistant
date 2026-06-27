@@ -62,6 +62,7 @@ class ResearchAssistantWorkflowService:
                 "save_log": save_log,
                 "include_discovery": include_discovery,
                 "memory_context": "",
+                "coverage_retrieval_results": None,
                 "coverage_score": 0.0,
                 "mode": "basic",
                 "route": "basic_explore",
