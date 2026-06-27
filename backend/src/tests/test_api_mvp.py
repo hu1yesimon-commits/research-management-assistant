@@ -517,12 +517,25 @@ def test_research_assistant_basic_explore_response(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
+    assert "discovery_result" in body
+    assert "knowledge_result" in body
+    assert "idea_result" in body
+    assert "discovery" in body
+    assert "knowledge" in body
+    assert "ideas" in body
+    assert isinstance(body["errors"], list)
     assert body["route"] == "basic_explore"
     assert body["mode"] == "basic"
     assert body["discovery"]["enabled"] is True
     assert body["knowledge"]["answer"] == "No relevant knowledge chunks were found."
     assert body["knowledge"]["sources"] == []
     assert body["next_action"]["type"] == "upload_pdf"
+    assert body["discovery_result"]["enabled"] is True
+    assert body["knowledge_result"]["enabled"] is True
+    assert body["idea_result"]["enabled"] is True
+    assert body["discovery_result"]["top_k"] == body["discovery"]["candidates"]
+    assert body["knowledge_result"]["answer"] == body["knowledge"]["answer"]
+    assert isinstance(body["errors"], list)
 
     app.dependency_overrides.clear()
 
@@ -581,9 +594,19 @@ def test_research_assistant_research_include_discovery_uses_default_dependency_g
 
     assert response.status_code == 200
     body = response.json()
+    assert "discovery_result" in body
+    assert "knowledge_result" in body
+    assert "idea_result" in body
+    assert "discovery" in body
+    assert "knowledge" in body
+    assert "ideas" in body
+    assert isinstance(body["errors"], list)
     assert body["route"] == "research_idea"
     assert body["discovery"]["enabled"] is True
     assert body["discovery"]["candidates"][0]["paper"]["paper_id"] == "api-paper-1"
+    assert body["discovery_result"]["enabled"] is True
+    assert body["idea_result"]["enabled"] is True
+    assert body["idea_result"]["ideas"][0]["title"]
 
     app.dependency_overrides.clear()
 
