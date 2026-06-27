@@ -532,7 +532,7 @@ def test_research_assistant_basic_explore_response(tmp_path):
     assert body["next_action"]["type"] == "upload_pdf"
     assert body["discovery_result"]["enabled"] is True
     assert body["knowledge_result"]["enabled"] is True
-    assert body["idea_result"]["enabled"] is True
+    assert body["idea_result"]["enabled"] is False
     assert body["discovery_result"]["top_k"] == body["discovery"]["candidates"]
     assert body["knowledge_result"]["answer"] == body["knowledge"]["answer"]
     assert isinstance(body["errors"], list)
