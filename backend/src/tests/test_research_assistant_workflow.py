@@ -2,6 +2,8 @@ from services.qa_service import QAServiceError
 from services.retrieval_service import RetrievalServiceError
 from services.research_assistant_workflow import ResearchAssistantWorkflowError, ResearchAssistantWorkflowService
 from services.schemas import (
+    AssistantStageError,
+    DiscoveryResult,
     ExperimentLogRequest,
     IdeaDiscoverySection,
     IdeaKnowledgeSection,
@@ -9,8 +11,11 @@ from services.schemas import (
     IdeaRecommendResponse,
     KnowledgeAnswerResponse,
     KnowledgeAnswerSource,
+    KnowledgeResult,
     KnowledgeSearchResponse,
     KnowledgeSearchResult,
+    NextActionOption,
+    ResearchAssistantNextAction,
 )
 
 
@@ -139,6 +144,34 @@ def make_log() -> ExperimentLogRequest:
         goal="improve graph reconstruction precision",
         tags=["graph"],
     )
+
+
+def test_assistant_v1_result_contracts_have_safe_defaults():
+    discovery = DiscoveryResult(enabled=True)
+    knowledge = KnowledgeResult(enabled=False)
+    error = AssistantStageError(stage="coverage", message="retrieval unavailable")
+
+    assert discovery.top_k == []
+    assert discovery.total_raw == 0
+    assert knowledge.sources == []
+    assert error.recoverable is True
+
+
+def test_assistant_v1_next_action_supports_structured_options():
+    next_action = ResearchAssistantNextAction(
+        type="choose_path",
+        options=[
+            NextActionOption(
+                id="continue_search",
+                label="Search papers",
+                request_patch={"intent": "search"},
+            )
+        ],
+        message="Choose how to continue.",
+    )
+
+    assert next_action.options[0].id == "continue_search"
+    assert next_action.options[0].request_patch == {"intent": "search"}
 
 
 def build_service(

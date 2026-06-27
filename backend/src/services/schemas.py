@@ -266,9 +266,57 @@ class ResearchQueryResponse(BaseModel):
     knowledge: ResearchKnowledgeSection
 
 
+class AssistantStageError(BaseModel):
+    stage: Literal[
+        "coverage",
+        "query_rewrite",
+        "multi_search",
+        "postprocess",
+        "llm_judge",
+        "rank",
+        "knowledge_answer",
+        "idea_generation",
+        "routing",
+    ]
+    message: str
+    recoverable: bool = True
+
+
+class DiscoveryResult(BaseModel):
+    enabled: bool
+    top_k: list[dict] = Field(default_factory=list)
+    rewritten_queries: list[str] = Field(default_factory=list)
+    total_raw: int = 0
+    total_deduped: int = 0
+    scoring_summary: dict = Field(default_factory=dict)
+    error: str | None = None
+
+
+class KnowledgeResult(BaseModel):
+    enabled: bool
+    answer: str | None = None
+    sources: list[KnowledgeAnswerSource] = Field(default_factory=list)
+    mode: str | None = None
+    error: str | None = None
+
+
+class IdeaResult(BaseModel):
+    enabled: bool
+    ideas: list[IdeaOption] = Field(default_factory=list)
+    supporting_evidence: list[IdeaSupportingEvidence] = Field(default_factory=list)
+    log_id: int | None = None
+    error: str | None = None
+
+
+class NextActionOption(BaseModel):
+    id: str
+    label: str
+    request_patch: dict = Field(default_factory=dict)
+
+
 class ResearchAssistantNextAction(BaseModel):
-    type: Literal["choose_intent", "upload_pdf", "select_idea", "none"]
-    options: list[str] = Field(default_factory=list)
+    type: Literal["choose_path", "choose_intent", "upload_pdf", "select_idea", "none"]
+    options: list[NextActionOption | str] = Field(default_factory=list)
     message: str | None = None
 
 
@@ -300,6 +348,9 @@ class ResearchAssistantResponse(BaseModel):
     discovery: ResearchDiscoverySection
     knowledge: ResearchKnowledgeSection
     ideas: list[IdeaOption] = Field(default_factory=list)
+    discovery_result: DiscoveryResult = Field(default_factory=lambda: DiscoveryResult(enabled=False))
+    knowledge_result: KnowledgeResult = Field(default_factory=lambda: KnowledgeResult(enabled=False))
+    idea_result: IdeaResult = Field(default_factory=lambda: IdeaResult(enabled=False))
     errors: list[ResearchAssistantError] = Field(default_factory=list)
 
 
