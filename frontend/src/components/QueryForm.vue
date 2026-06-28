@@ -2,8 +2,8 @@
   <form class="query-form" @submit.prevent="submitForm">
     <div class="query-form__header">
       <div>
-        <h2>Research Query</h2>
-        <p>Primary frontend entrypoint: <code>POST /research/query</code></p>
+        <h2>Direct Research Query</h2>
+        <p>Fallback path: <code>POST /research/query</code></p>
       </div>
       <button class="button button--primary" type="submit" :disabled="loading">
         {{ loading ? "Searching..." : "Search" }}

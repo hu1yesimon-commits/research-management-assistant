@@ -747,6 +747,17 @@ class MemoryStore:
 
         return candidates
 
+    def count_candidate_papers(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS paper_count
+                FROM papers
+                """
+            ).fetchone()
+
+        return int(row["paper_count"])
+
     def get_paper(self, paper_id: str) -> dict | None:
         with self._connect() as connection:
             row = connection.execute(

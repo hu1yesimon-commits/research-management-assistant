@@ -60,6 +60,10 @@ export function listExperimentLogs() {
   return request("/experiments/logs");
 }
 
+export function getMemorySummary() {
+  return request("/memory/summary");
+}
+
 export function recommendIdeas(payload) {
   return request("/ideas/recommend", {
     method: "POST",

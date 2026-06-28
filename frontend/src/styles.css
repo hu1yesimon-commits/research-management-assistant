@@ -48,6 +48,8 @@ code {
   width: min(1400px, calc(100% - 32px));
   margin: 0 auto;
   padding: 24px 0 40px;
+  display: grid;
+  gap: 18px;
 }
 
 .topbar,
@@ -149,8 +151,8 @@ textarea {
 }
 
 .workspace-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-bottom: 18px;
+  grid-template-columns: 1.1fr 0.9fr;
+  margin-bottom: 0;
 }
 
 .panel {
@@ -160,6 +162,10 @@ textarea {
 
 .panel--full {
   margin-bottom: 18px;
+}
+
+.panel--collapsed {
+  padding-bottom: 16px;
 }
 
 .panel__heading,
@@ -245,7 +251,21 @@ textarea {
   min-width: 0;
 }
 
+.lifecycle-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 .kv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin-top: 12px;
+  color: var(--muted);
+}
+
+.memory-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 16px;
@@ -409,6 +429,7 @@ textarea {
   }
 
   .query-form__grid,
+  .memory-summary-grid,
   .kv-grid {
     grid-template-columns: 1fr;
   }

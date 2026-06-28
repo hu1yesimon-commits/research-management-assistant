@@ -52,7 +52,7 @@
 
     <div v-if="response" class="panel__section">
       <div class="section-title">
-        <h3>Workflow Route</h3>
+        <h3>Latest Run</h3>
         <span class="meta">mode: {{ response.mode || "n/a" }}</span>
       </div>
 
@@ -63,60 +63,6 @@
 
       <p v-if="response.route_reason" class="hint">{{ response.route_reason }}</p>
       <p v-if="response.assistant_message" class="answer-block">{{ response.assistant_message }}</p>
-    </div>
-
-    <div v-if="response?.next_action" class="panel__section">
-      <div class="section-title">
-        <h3>Next Action</h3>
-        <span v-if="response.next_action.type" class="meta">{{ response.next_action.type }}</span>
-      </div>
-      <p class="text-block">{{ response.next_action.message }}</p>
-      <div v-if="response.next_action.options?.length" class="kv-grid">
-        <span v-for="option in response.next_action.options" :key="option">option: {{ option }}</span>
-      </div>
-    </div>
-
-    <div v-if="response?.suggested_user_actions?.length" class="panel__section">
-      <div class="section-title">
-        <h3>Suggested Actions</h3>
-        <span class="meta">{{ response.suggested_user_actions.length }} action{{ response.suggested_user_actions.length === 1 ? "" : "s" }}</span>
-      </div>
-      <ul class="assistant-actions">
-        <li v-for="action in response.suggested_user_actions" :key="action">{{ action }}</li>
-      </ul>
-    </div>
-
-    <div v-if="response?.errors?.length" class="panel__section">
-      <div class="section-title">
-        <h3>Workflow Notes</h3>
-        <span class="meta">{{ response.errors.length }} note{{ response.errors.length === 1 ? "" : "s" }}</span>
-      </div>
-      <ul class="stack-list">
-        <li v-for="(workflowError, errorIndex) in response.errors" :key="errorIndex" class="source-card">
-          <strong>{{ workflowError.section || "workflow" }}:</strong> {{ workflowError.message }}
-        </li>
-      </ul>
-    </div>
-
-    <div v-if="response?.ideas?.length" class="panel__section">
-      <div class="section-title">
-        <h3>Ideas</h3>
-        <span class="meta">{{ response.ideas.length }} returned</span>
-      </div>
-
-      <ul class="stack-list">
-        <li v-for="(idea, ideaIndex) in response.ideas" :key="idea.title + '-' + ideaIndex" class="idea-card">
-          <div class="card-title-row">
-            <h4>{{ idea.title }}</h4>
-            <span class="meta">Idea {{ ideaIndex + 1 }}</span>
-          </div>
-          <p class="text-block">{{ idea.rationale }}</p>
-          <div class="kv-grid">
-            <span>Metric: {{ idea.suggested_validation_metric || "n/a" }}</span>
-            <span>Next step: {{ idea.next_small_experiment || "n/a" }}</span>
-          </div>
-        </li>
-      </ul>
     </div>
   </section>
 </template>
@@ -178,43 +124,3 @@ async function submitAssistant() {
   }
 }
 </script>
-
-<style scoped>
-.assistant-form {
-  margin-top: 16px;
-}
-
-.assistant-form__full {
-  display: block;
-}
-
-.assistant-form__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 14px;
-  margin-top: 16px;
-}
-
-.assistant-form__status {
-  margin-top: 16px;
-}
-
-.assistant-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.assistant-actions li {
-  color: var(--text-muted);
-  font-size: 0.86rem;
-}
-
-.idea-card + .idea-card {
-  margin-top: 14px;
-}
-</style>

@@ -79,7 +79,7 @@ Optional real providers:
 - `POST /memory/semantic/{memory_id}/archive`
   用户显式归档一条 semantic memory；系统不会仅凭时间自动归档
 - `GET /memory/summary`
-  返回 `candidate_count`、`known_dois`、`recent_logs`
+  返回 `candidate_count`、`saved_paper_count`、`pending_candidate_count`、`confirmed_memory_count`、`known_doi_count`、`recent_logs`
 - `POST /knowledge/search`
   输入 `{"query":"...","top_k":5}`，对已 `embedded` 的知识块执行 retrieval MVP，返回 chunk / paper 信息；当前只做召回，不做 RAG answer generation 或 LLM 总结
 - `POST /knowledge/answer`
@@ -277,15 +277,18 @@ curl -s http://127.0.0.1:8000/memory/summary
 
 ## Frontend MVP
 
-当前仓库包含一个 Vue 3 + Vite 单页前端 MVP，主入口是 `POST /research/query`。
+当前仓库包含一个 Vue 3 + Vite 单页前端 MVP，当前首页是 assistant-first workbench：优先走 `POST /research/assistant`，保留 `POST /research/query` 作为 direct fallback path。
 
 当前前端范围：
 
 - 页面加载时调用 `GET /health` 显示 backend status
+- 首页先展示 Assistant Workflow form，再把 assistant route / next action / workflow notes 放到独立的 Assistant Summary panel
 - 查询工作台把 unified workflow 分成 `knowledge` 和 `discovery` 两个 section
 - `discovery` 只表示 current query results，只有点击 `Accept` 后才会进入 SQLite saved lifecycle
 - `discovery.candidates` 只表示推荐阅读候选，不等同于 grounded answer sources
 - `knowledge.sources` 只表示已 `embedded` 本地知识库证据
+- workbench 会调用 `GET /memory/summary` 显示 lightweight memory summary card
+- saved candidates lifecycle 默认折叠，需要用户展开后再进行 PDF upload / embed
 - candidates 面板支持调用：
   - `GET /papers/candidates`
   - `POST /papers/{paper_id}/accept`

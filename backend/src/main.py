@@ -523,9 +523,15 @@ def archive_semantic_memory(
 
 @app.get("/memory/summary")
 def memory_summary(store: MemoryStore = Depends(get_memory_store)):
-    candidates = store.list_candidate_papers()
+    saved_paper_count = store.count_candidate_papers()
+    pending_candidates = store.list_memory_candidates(status="pending")
+    confirmed_memories = store.list_semantic_memory(status="confirmed")
+    known_dois = store.list_known_dois()
     return {
-        "candidate_count": len(candidates),
-        "known_dois": store.list_known_dois(),
+        "candidate_count": saved_paper_count,
+        "saved_paper_count": saved_paper_count,
+        "pending_candidate_count": len(pending_candidates),
+        "confirmed_memory_count": len(confirmed_memories),
+        "known_doi_count": len(known_dois),
         "recent_logs": store.list_experiment_logs(limit=5),
     }

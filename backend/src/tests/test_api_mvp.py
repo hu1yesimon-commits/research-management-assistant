@@ -191,6 +191,35 @@ class FakeRetrievalService:
         )
 
 
+def make_memory_candidate(**overrides):
+    candidate = {
+        "candidate_type": "semantic_proposal",
+        "category": "experiment_target",
+        "subject": "defect classification",
+        "predicate": "uses_object",
+        "object": "focal loss",
+        "summary": "defect classification repeatedly uses focal loss",
+        "source_log_ids": [1, 2, 3],
+        "evidence_count": 3,
+        "score": 0.8,
+        "status": "pending",
+    }
+    candidate.update(overrides)
+    return candidate
+
+
+def make_paper(paper_id: str, doi: str) -> PaperMetadata:
+    return PaperMetadata(
+        paper_id=paper_id,
+        source_ids=PaperId(doi=doi),
+        title=f"Paper {paper_id}",
+        authors=["Tester"],
+        abstract="Useful abstract.",
+        doi=doi,
+        source="test",
+    )
+
+
 def override_store_with_path(test_db):
     return lambda: get_memory_store(str(test_db))
 
@@ -872,6 +901,71 @@ def test_advanced_search_uses_deterministic_memory_context_rewriting(tmp_path):
     app.dependency_overrides.clear()
 
 
+def test_memory_summary_returns_review_and_confirmed_counts(tmp_path):
+    test_db = tmp_path / "api-memory-summary.sqlite3"
+    store = get_memory_store(str(test_db))
+    pending_candidate_id = store.upsert_memory_candidate(make_memory_candidate())
+    accepted_candidate_id = store.upsert_memory_candidate(
+        make_memory_candidate(
+            category="user_preference",
+            subject="user",
+            predicate="prefers",
+            object="lightweight",
+            summary="User repeatedly prefers lightweight approaches.",
+            source_log_ids=[4, 5],
+            evidence_count=2,
+            score=0.9,
+        )
+    )
+    store.upsert_semantic_memory_from_candidate(store.get_memory_candidate(accepted_candidate_id))
+    store.update_memory_candidate_status(accepted_candidate_id, "accepted")
+    store.add_experiment_log("latest memory summary log", tags=["memory", "summary"])
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    client = TestClient(app)
+
+    response = client.get("/memory/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert pending_candidate_id > 0
+    assert body["candidate_count"] == 0
+    assert body["saved_paper_count"] == 0
+    assert body["pending_candidate_count"] == 1
+    assert body["confirmed_memory_count"] == 1
+    assert body["known_doi_count"] == 0
+    assert len(body["recent_logs"]) == 1
+    assert body["recent_logs"][0]["content"] == "latest memory summary log"
+    assert body["recent_logs"][0]["tags"] == ["memory", "summary"]
+
+    app.dependency_overrides.clear()
+
+
+def test_memory_summary_returns_true_saved_paper_counts_above_list_limit(tmp_path):
+    test_db = tmp_path / "api-memory-summary-count.sqlite3"
+    store = get_memory_store(str(test_db))
+
+    for index in range(101):
+        paper_id = f"saved-paper-{index}"
+        paper = make_paper(paper_id=paper_id, doi=f"10.1000/{paper_id}")
+        store.save_candidate_paper(
+            paper,
+            FakeJudge().judge(query="graph reconstruction", paper=paper),
+        )
+
+    app.dependency_overrides[get_memory_store] = lambda: store
+    client = TestClient(app)
+
+    response = client.get("/memory/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidate_count"] == 101
+    assert body["saved_paper_count"] == 101
+
+    app.dependency_overrides.clear()
+
+
 def test_research_query_discovery_returns_candidates_without_persisting_to_sqlite(tmp_path):
     test_db = tmp_path / "api-research-query-no-persist.sqlite3"
     store = get_memory_store(str(test_db))
@@ -939,7 +1033,8 @@ def test_upload_pdf_updates_candidate_to_uploaded_and_known_doi(tmp_path):
     candidates = client.get("/papers/candidates").json()
     assert candidates[0]["status"] == "uploaded"
     assert candidates[0]["pdf_path"] == body["pdf_path"]
-    assert client.get("/memory/summary").json()["known_dois"] == ["10.1000/upload-paper-1"]
+    summary = client.get("/memory/summary").json()
+    assert summary["known_doi_count"] == 1
 
     app.dependency_overrides.clear()
 

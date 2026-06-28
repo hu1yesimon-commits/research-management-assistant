@@ -3,7 +3,7 @@
     <header class="topbar">
       <div>
         <h1>Research Workbench</h1>
-        <p>Unified discovery and knowledge workflow for the current backend MVP.</p>
+        <p>Assistant-first research flow with direct query fallback and local lifecycle controls.</p>
       </div>
       <div class="status-cluster">
         <span class="badge" :class="healthBadgeClass">{{ healthLabel }}</span>
@@ -27,8 +27,7 @@
       :run-assistant="handleAssistant"
       @success="handleAssistantSuccess"
     />
-
-    <QueryForm :loading="queryLoading" @submit="handleQuery" />
+    <AssistantSummaryPanel :summary="assistantSummary" />
 
     <p class="meta">Results source: {{ resultSourceLabel }}</p>
     <section class="workspace-grid">
@@ -40,17 +39,52 @@
       />
     </section>
 
-    <CandidateLifecyclePanel
-      :candidates="candidates"
-      :loading="candidatesLoading"
-      :error="candidatesError"
-      :action-states="candidateActionStates"
-      :selected-files="selectedFiles"
-      @accept="handleAccept"
-      @upload="handleUpload"
-      @embed="handleEmbed"
-      @refresh="loadCandidates"
-      @select-file="handleFileSelection"
+    <section :class="['panel', 'panel--full', !isLifecycleOpen && 'panel--collapsed']">
+      <div class="panel__heading">
+        <div>
+          <h2>Research Query</h2>
+          <p>Fallback path for direct <code>POST /research/query</code> calls when you want manual control.</p>
+        </div>
+      </div>
+      <QueryForm :loading="queryLoading" @submit="handleQuery" />
+    </section>
+
+    <section class="panel panel--full">
+      <div class="panel__heading">
+        <div>
+          <h2>Saved Candidates & Lifecycle</h2>
+          <p>Persisted papers, PDF upload, and embedding stay out of the main result flow by default.</p>
+        </div>
+        <button class="button button--ghost" type="button" @click="isLifecycleOpen = !isLifecycleOpen">
+          {{ isLifecycleOpen ? "Hide" : "Open" }}
+        </button>
+      </div>
+
+      <p v-if="candidateActionHint" class="success-text">{{ candidateActionHint }}</p>
+
+      <p v-if="!isLifecycleOpen && !candidates.length" class="empty-state">
+        No saved papers yet. Accept a discovery candidate to start building your local research set.
+      </p>
+
+      <CandidateLifecyclePanel
+        v-if="isLifecycleOpen"
+        :candidates="candidates"
+        :loading="candidatesLoading"
+        :error="candidatesError"
+        :action-states="candidateActionStates"
+        :selected-files="selectedFiles"
+        @accept="handleAccept"
+        @upload="handleUpload"
+        @embed="handleEmbed"
+        @refresh="loadCandidates"
+        @select-file="handleFileSelection"
+      />
+    </section>
+
+    <MemorySummaryCard
+      :summary="memorySummary"
+      :loading="memorySummaryLoading"
+      :error="memorySummaryError"
     />
 
     <IdeaAssistantPanel />
@@ -66,15 +100,18 @@ import {
   embedPaper,
   getCandidates,
   getHealth,
+  getMemorySummary,
   researchAssistant,
   researchQuery,
   uploadPdf,
 } from "../api";
+import AssistantSummaryPanel from "./AssistantSummaryPanel.vue";
 import AssistantWorkflowPanel from "./AssistantWorkflowPanel.vue";
 import CandidateLifecyclePanel from "./CandidateLifecyclePanel.vue";
 import DiscoveryPanel from "./DiscoveryPanel.vue";
 import IdeaAssistantPanel from "./IdeaAssistantPanel.vue";
 import KnowledgePanel from "./KnowledgePanel.vue";
+import MemorySummaryCard from "./MemorySummaryCard.vue";
 import QueryForm from "./QueryForm.vue";
 
 const healthStatus = ref("checking");
@@ -83,12 +120,17 @@ const queryLoading = ref(false);
 const queryError = ref("");
 const queryResponse = ref(null);
 const assistantResponse = ref(null);
+const memorySummary = ref(null);
+const memorySummaryLoading = ref(false);
+const memorySummaryError = ref("");
 const activeResultSource = ref("query");
 const candidates = ref([]);
 const candidatesLoading = ref(false);
 const candidatesError = ref("");
 const candidateActionStates = reactive({});
 const selectedFiles = reactive({});
+const isLifecycleOpen = ref(false);
+const candidateActionHint = ref("");
 
 const apiBaseUrl = API_BASE_URL;
 
@@ -105,6 +147,22 @@ const defaultKnowledgeSection = {
   error: null,
   mode: null,
 };
+
+const assistantSummary = computed(() => {
+  if (!assistantResponse.value) {
+    return null;
+  }
+  return {
+    mode: assistantResponse.value.mode,
+    route: assistantResponse.value.route,
+    coverage_score: assistantResponse.value.coverage_score,
+    route_reason: assistantResponse.value.route_reason,
+    assistant_message: assistantResponse.value.assistant_message,
+    next_action: assistantResponse.value.next_action,
+    suggested_user_actions: assistantResponse.value.suggested_user_actions,
+    errors: assistantResponse.value.errors,
+  };
+});
 
 const activeResponse = computed(() => {
   if (activeResultSource.value === "assistant") {
@@ -146,6 +204,7 @@ const healthBadgeClass = computed(() => {
 onMounted(() => {
   loadHealth();
   loadCandidates();
+  loadMemorySummary();
 });
 
 async function loadHealth() {
@@ -187,12 +246,26 @@ function handleAssistantSuccess(response) {
   activeResultSource.value = "assistant";
 }
 
+async function loadMemorySummary() {
+  memorySummaryLoading.value = true;
+  memorySummaryError.value = "";
+
+  try {
+    memorySummary.value = await getMemorySummary();
+  } catch (error) {
+    memorySummaryError.value = error.message;
+  } finally {
+    memorySummaryLoading.value = false;
+  }
+}
+
 async function loadCandidates() {
   candidatesLoading.value = true;
   candidatesError.value = "";
 
   try {
-    candidates.value = await getCandidates();
+    const response = await getCandidates();
+    candidates.value = Array.isArray(response) ? response : [];
   } catch (error) {
     candidatesError.value = error.message;
   } finally {
@@ -211,6 +284,7 @@ function handleFileSelection({ paperId, file }) {
 async function handleAccept(paperId) {
   await runCandidateAction(paperId, async () => {
     const result = await acceptPaper(paperId);
+    candidateActionHint.value = "";
     return `Accepted: ${result.status}`;
   });
 }
@@ -226,6 +300,7 @@ async function handleDiscoveryAccept(candidate) {
       paper: candidate.paper,
       judgement: candidate.judgement || null,
     });
+    candidateActionHint.value = "Paper saved. Open Saved Candidates to upload the PDF and continue embedding.";
     return `Saved and accepted: ${result.status}`;
   });
 }
@@ -257,14 +332,22 @@ async function runCandidateAction(paperId, action) {
     const message = await action();
     setCandidateState(paperId, { loading: false, error: "", message });
     await loadCandidates();
+    await loadMemorySummary();
   } catch (error) {
-    setCandidateState(paperId, { loading: false, error: error.message, message: "" });
+    setCandidateState(paperId, {
+      loading: false,
+      error: error.message || "Candidate action failed",
+      message: "",
+    });
   }
 }
 
 function setCandidateState(paperId, patch) {
   candidateActionStates[paperId] = {
-    ...(candidateActionStates[paperId] || {}),
+    loading: false,
+    error: "",
+    message: "",
+    ...candidateActionStates[paperId],
     ...patch,
   };
 }
