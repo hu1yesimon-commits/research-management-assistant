@@ -23,8 +23,15 @@
       <strong>Partial failure:</strong> one workflow section failed, but the other section may still be usable.
     </div>
 
+    <AssistantWorkflowPanel
+      :run-assistant="handleAssistant"
+      @success="handleAssistantSuccess"
+      @failure="handleAssistantFailure"
+    />
+
     <QueryForm :loading="queryLoading" @submit="handleQuery" />
 
+    <p class="meta">Results source: {{ resultSourceLabel }}</p>
     <section class="workspace-grid">
       <KnowledgePanel :knowledge="knowledgeSection" />
       <DiscoveryPanel
@@ -60,9 +67,11 @@ import {
   embedPaper,
   getCandidates,
   getHealth,
+  researchAssistant,
   researchQuery,
   uploadPdf,
 } from "../api";
+import AssistantWorkflowPanel from "./AssistantWorkflowPanel.vue";
 import CandidateLifecyclePanel from "./CandidateLifecyclePanel.vue";
 import DiscoveryPanel from "./DiscoveryPanel.vue";
 import IdeaAssistantPanel from "./IdeaAssistantPanel.vue";
@@ -74,6 +83,8 @@ const healthError = ref("");
 const queryLoading = ref(false);
 const queryError = ref("");
 const queryResponse = ref(null);
+const assistantResponse = ref(null);
+const activeResultSource = ref("query");
 const candidates = ref([]);
 const candidatesLoading = ref(false);
 const candidatesError = ref("");
@@ -96,8 +107,18 @@ const defaultKnowledgeSection = {
   mode: null,
 };
 
-const discoverySection = computed(() => queryResponse.value?.discovery || defaultDiscoverySection);
-const knowledgeSection = computed(() => queryResponse.value?.knowledge || defaultKnowledgeSection);
+const activeResponse = computed(() => {
+  if (activeResultSource.value === "assistant") {
+    return assistantResponse.value;
+  }
+  return queryResponse.value;
+});
+
+const discoverySection = computed(() => activeResponse.value?.discovery || defaultDiscoverySection);
+const knowledgeSection = computed(() => activeResponse.value?.knowledge || defaultKnowledgeSection);
+const resultSourceLabel = computed(() => {
+  return activeResultSource.value === "assistant" ? "assistant" : "research/query";
+});
 
 const hasPartialFailure = computed(() => {
   return Boolean(discoverySection.value.error || knowledgeSection.value.error);
@@ -150,11 +171,26 @@ async function handleQuery(payload) {
 
   try {
     queryResponse.value = await researchQuery(payload);
+    activeResultSource.value = "query";
   } catch (error) {
     queryError.value = error.message;
   } finally {
     queryLoading.value = false;
   }
+}
+
+function handleAssistant(payload) {
+  return researchAssistant(payload);
+}
+
+function handleAssistantSuccess(response) {
+  assistantResponse.value = response;
+  activeResultSource.value = "assistant";
+}
+
+function handleAssistantFailure() {
+  assistantResponse.value = null;
+  activeResultSource.value = "query";
 }
 
 async function loadCandidates() {

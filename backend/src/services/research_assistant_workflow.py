@@ -4,7 +4,11 @@ from dataclasses import dataclass
 
 from graph.builder import build_research_assistant_graph
 from services.schemas import (
+    DiscoveryResult,
     ExperimentLogRequest,
+    IdeaResult,
+    KnowledgeResult,
+    NextActionOption,
     ResearchAssistantError,
     ResearchAssistantNextAction,
     ResearchAssistantResponse,
@@ -59,6 +63,7 @@ class ResearchAssistantWorkflowService:
                 "save_log": save_log,
                 "include_discovery": include_discovery,
                 "memory_context": "",
+                "coverage_retrieval_results": None,
                 "coverage_score": 0.0,
                 "mode": "basic",
                 "route": "basic_explore",
@@ -66,6 +71,9 @@ class ResearchAssistantWorkflowService:
                 "discovery": ResearchDiscoverySection(enabled=False).model_dump(),
                 "knowledge": ResearchKnowledgeSection(enabled=False).model_dump(),
                 "ideas": [],
+                "discovery_result": DiscoveryResult(enabled=False).model_dump(),
+                "knowledge_result": KnowledgeResult(enabled=False).model_dump(),
+                "idea_result": IdeaResult(enabled=False).model_dump(),
                 "assistant_message": "",
                 "next_action": None,
                 "suggested_user_actions": [],
@@ -81,14 +89,29 @@ class ResearchAssistantWorkflowService:
             coverage_score=result["coverage_score"],
             route_reason=result["route_reason"],
             assistant_message=result["assistant_message"],
-            next_action=(
-                ResearchAssistantNextAction(**result["next_action"])
-                if result.get("next_action") is not None
-                else None
-            ),
+            next_action=_normalize_next_action(result.get("next_action")),
             suggested_user_actions=result["suggested_user_actions"],
             discovery=ResearchDiscoverySection(**result["discovery"]),
             knowledge=ResearchKnowledgeSection(**result["knowledge"]),
             ideas=result["ideas"],
+            discovery_result=DiscoveryResult(**result["discovery_result"]),
+            knowledge_result=KnowledgeResult(**result["knowledge_result"]),
+            idea_result=IdeaResult(**result["idea_result"]),
             errors=[ResearchAssistantError(**error) for error in result["errors"]],
         )
+
+
+def _normalize_next_action(action: dict | None) -> ResearchAssistantNextAction | None:
+    if action is None:
+        return None
+    options = [
+        NextActionOption(
+            id=option,
+            label=option.replace("_", " ").title(),
+            request_patch={},
+        )
+        if isinstance(option, str)
+        else NextActionOption(**option)
+        for option in action.get("options", [])
+    ]
+    return ResearchAssistantNextAction(**{**action, "options": options})

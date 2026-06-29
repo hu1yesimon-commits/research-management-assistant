@@ -92,4 +92,44 @@ describe("DiscoveryPanel", () => {
     expect(wrapper.text()).toContain("Current judge output may be a placeholder");
     expect(wrapper.text()).toContain("Scores are tied across all returned candidates");
   });
+
+  test("does not show placeholder scoring copy for non-mock varied scores", () => {
+    const wrapper = mount(DiscoveryPanel, {
+      props: {
+        discovery: {
+          enabled: true,
+          candidates: [
+            {
+              paper: {
+                paper_id: "candidate-5",
+                title: "LLM Judged Candidate",
+              },
+              judgement: {
+                final_score: 0.82,
+                llm_relevance_score: 0.9,
+                tags: ["deepseek"],
+              },
+            },
+            {
+              paper: {
+                paper_id: "candidate-6",
+                title: "Another LLM Judged Candidate",
+              },
+              judgement: {
+                final_score: 0.64,
+                llm_relevance_score: 0.7,
+                tags: ["deepseek"],
+              },
+            },
+          ],
+          error: null,
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("LLM Judged Candidate");
+    expect(wrapper.text()).not.toContain("Current judge output may be a placeholder");
+    expect(wrapper.text()).not.toContain("mock scoring");
+    expect(wrapper.text()).not.toContain("Scores are tied across all returned candidates");
+  });
 });

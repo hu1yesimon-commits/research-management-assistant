@@ -1,5 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Literal
 
 class PaperId(BaseModel):
@@ -266,15 +266,80 @@ class ResearchQueryResponse(BaseModel):
     knowledge: ResearchKnowledgeSection
 
 
+class AssistantStageError(BaseModel):
+    stage: Literal[
+        "coverage",
+        "query_rewrite",
+        "multi_search",
+        "postprocess",
+        "llm_judge",
+        "rank",
+        "knowledge_answer",
+        "idea_generation",
+        "routing",
+    ]
+    message: str
+    recoverable: bool = True
+
+
+class DiscoveryResult(BaseModel):
+    enabled: bool
+    top_k: list[dict] = Field(default_factory=list)
+    rewritten_queries: list[str] = Field(default_factory=list)
+    total_raw: int = 0
+    total_deduped: int = 0
+    scoring_summary: dict = Field(default_factory=dict)
+    error: str | None = None
+
+
+class KnowledgeResult(BaseModel):
+    enabled: bool
+    answer: str | None = None
+    sources: list[KnowledgeAnswerSource] = Field(default_factory=list)
+    mode: str | None = None
+    error: str | None = None
+
+
+class IdeaResult(BaseModel):
+    enabled: bool
+    ideas: list[IdeaOption] = Field(default_factory=list)
+    supporting_evidence: list[IdeaSupportingEvidence] = Field(default_factory=list)
+    log_id: int | None = None
+    error: str | None = None
+
+
+class NextActionOption(BaseModel):
+    id: str
+    label: str
+    request_patch: dict = Field(default_factory=dict)
+
+
 class ResearchAssistantNextAction(BaseModel):
-    type: Literal["choose_intent", "upload_pdf", "select_idea", "none"]
-    options: list[str] = Field(default_factory=list)
+    type: Literal["choose_path", "choose_intent", "upload_pdf", "select_idea", "none"]
+    options: list[NextActionOption] = Field(default_factory=list)
     message: str | None = None
 
 
-class ResearchAssistantError(BaseModel):
-    section: Literal["coverage", "discovery", "knowledge", "idea", "routing"]
-    message: str
+class ResearchAssistantError(AssistantStageError):
+    section: Literal["coverage", "discovery", "knowledge", "idea", "routing"] | None = None
+
+    @model_validator(mode="after")
+    def populate_legacy_section(self):
+        if self.section is not None:
+            return self
+        stage_to_section = {
+            "coverage": "coverage",
+            "query_rewrite": "discovery",
+            "multi_search": "discovery",
+            "postprocess": "discovery",
+            "llm_judge": "discovery",
+            "rank": "discovery",
+            "knowledge_answer": "knowledge",
+            "idea_generation": "idea",
+            "routing": "routing",
+        }
+        self.section = stage_to_section[self.stage]
+        return self
 
 
 class ResearchAssistantRequest(BaseModel):
@@ -300,6 +365,9 @@ class ResearchAssistantResponse(BaseModel):
     discovery: ResearchDiscoverySection
     knowledge: ResearchKnowledgeSection
     ideas: list[IdeaOption] = Field(default_factory=list)
+    discovery_result: DiscoveryResult = Field(default_factory=lambda: DiscoveryResult(enabled=False))
+    knowledge_result: KnowledgeResult = Field(default_factory=lambda: KnowledgeResult(enabled=False))
+    idea_result: IdeaResult = Field(default_factory=lambda: IdeaResult(enabled=False))
     errors: list[ResearchAssistantError] = Field(default_factory=list)
 
 

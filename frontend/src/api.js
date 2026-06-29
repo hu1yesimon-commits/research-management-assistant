@@ -36,6 +36,16 @@ export function researchQuery(payload) {
   });
 }
 
+export function researchAssistant(payload) {
+  return request("/research/assistant", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function createExperimentLog(payload) {
   return request("/experiments/logs", {
     method: "POST",
