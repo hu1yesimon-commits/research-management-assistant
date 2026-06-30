@@ -4,6 +4,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 
 from services.schemas import JudgeResult, PaperMetadata
+from services.sqlite_migrations import apply_migrations
 
 """
 2026-06-07 更新：
@@ -127,6 +128,8 @@ class MemoryStore:
                 );
                 """
             )
+
+        apply_migrations(self.database_path)
 
     def add_experiment_log(self, content: str, tags: list[str] | None = None) -> int:
         now = self._now()
@@ -615,7 +618,7 @@ class MemoryStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO papers (
+                INSERT INTO papers (
                     paper_id,
                     title,
                     doi,
@@ -629,6 +632,17 @@ class MemoryStore:
                     updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(paper_id) DO UPDATE SET
+                    title = excluded.title,
+                    doi = excluded.doi,
+                    source = excluded.source,
+                    abstract = excluded.abstract,
+                    authors_json = excluded.authors_json,
+                    metadata_json = excluded.metadata_json,
+                    status = excluded.status,
+                    pdf_path = excluded.pdf_path,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
                 """,
                 (
                     paper.paper_id,
@@ -987,8 +1001,10 @@ class MemoryStore:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(self.database_path, timeout=5.0)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 5000")
         return connection
 
     def _get_existing_paper(self, paper_id: str) -> sqlite3.Row | None:

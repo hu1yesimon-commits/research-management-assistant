@@ -95,6 +95,23 @@ def test_initialize_creates_semantic_memory_table(tmp_path):
     assert "semantic_memory" in {row[0] for row in rows}
 
 
+def test_connect_configures_row_factory_and_sqlite_pragmas(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+
+    connection = store._connect()
+
+    try:
+        foreign_keys = connection.execute("PRAGMA foreign_keys").fetchone()[0]
+        busy_timeout = connection.execute("PRAGMA busy_timeout").fetchone()[0]
+    finally:
+        connection.close()
+
+    assert connection.row_factory is sqlite3.Row
+    assert foreign_keys == 1
+    assert busy_timeout == 5000
+
+
 def test_save_candidate_paper_can_be_listed(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
@@ -110,6 +127,47 @@ def test_save_candidate_paper_can_be_listed(tmp_path):
     assert candidates[0]["title"] == "Paper paper-1"
     assert candidates[0]["doi"] == "10.1000/test-doi"
     assert candidates[0]["status"] == "candidate"
+
+
+def test_save_candidate_paper_can_resave_existing_paper_with_child_rows(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+
+    paper = make_paper("paper-1", "10.1000/original")
+    store.save_candidate_paper(paper, make_judgement())
+    store.insert_knowledge_chunks(
+        "paper-1",
+        [{"chunk_index": 0, "text": "chunk", "chunk_hash": "hash-1", "vector_ref": None}],
+    )
+
+    with sqlite3.connect(store.database_path) as connection:
+        original_row_id = connection.execute(
+            "SELECT rowid FROM papers WHERE paper_id = ?",
+            ("paper-1",),
+        ).fetchone()[0]
+
+    updated_paper = make_paper("paper-1", "10.1000/updated")
+    updated_paper.title = "Updated title"
+
+    store.save_candidate_paper(updated_paper)
+
+    with sqlite3.connect(store.database_path) as connection:
+        stored_paper = connection.execute(
+            "SELECT rowid, title, doi FROM papers WHERE paper_id = ?",
+            ("paper-1",),
+        ).fetchone()
+        judgement_count = connection.execute(
+            "SELECT COUNT(*) FROM paper_judgements WHERE paper_id = ?",
+            ("paper-1",),
+        ).fetchone()[0]
+        chunk_count = connection.execute(
+            "SELECT COUNT(*) FROM knowledge_chunks WHERE paper_id = ?",
+            ("paper-1",),
+        ).fetchone()[0]
+
+    assert stored_paper == (original_row_id, "Updated title", "10.1000/updated")
+    assert judgement_count == 1
+    assert chunk_count == 1
 
 
 def test_add_experiment_log_can_be_listed(tmp_path):
@@ -351,6 +409,7 @@ def test_list_known_dois_only_returns_uploaded_chunked_and_embedded(tmp_path):
 def test_insert_and_list_knowledge_chunks_by_paper_id(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
+    store.save_candidate_paper(make_paper("paper-1", None))
 
     store.insert_knowledge_chunks(
         "paper-1",
@@ -395,6 +454,7 @@ def test_insert_and_list_knowledge_chunks_by_paper_id(tmp_path):
 def test_delete_knowledge_chunks_by_paper_id(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
+    store.save_candidate_paper(make_paper("paper-1", None))
 
     store.insert_knowledge_chunks(
         "paper-1",
@@ -409,6 +469,7 @@ def test_delete_knowledge_chunks_by_paper_id(tmp_path):
 def test_rebuild_knowledge_chunks_replaces_old_rows_for_same_paper(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
+    store.save_candidate_paper(make_paper("paper-1", None))
 
     store.insert_knowledge_chunks(
         "paper-1",
@@ -432,6 +493,7 @@ def test_rebuild_knowledge_chunks_replaces_old_rows_for_same_paper(tmp_path):
 def test_update_knowledge_chunk_vector_refs_by_chunk_index(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
+    store.save_candidate_paper(make_paper("paper-1", None))
     store.insert_knowledge_chunks(
         "paper-1",
         [
@@ -457,6 +519,7 @@ def test_update_knowledge_chunk_vector_refs_by_chunk_index(tmp_path):
 def test_clear_knowledge_chunk_vector_refs_for_paper(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
+    store.save_candidate_paper(make_paper("paper-1", None))
     store.insert_knowledge_chunks(
         "paper-1",
         [
@@ -473,6 +536,7 @@ def test_clear_knowledge_chunk_vector_refs_for_paper(tmp_path):
 def test_has_complete_knowledge_chunk_vector_refs_returns_true_only_when_all_chunks_are_non_empty(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
+    store.save_candidate_paper(make_paper("paper-1", None))
     store.insert_knowledge_chunks(
         "paper-1",
         [

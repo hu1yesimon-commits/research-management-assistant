@@ -278,7 +278,7 @@ git commit -m "merge: converge agent v1 and assistant workbench"
 - Create: `backend/src/tests/test_sqlite_migrations.py`
 - Modify: `backend/src/tests/test_memory_store.py`
 
-- [ ] **Step 1: Write failing migration tests**
+- [x] **Step 1: Write failing migration tests**
 
 ```python
 def test_migrations_create_default_session_and_v3_tables(tmp_path):
@@ -323,7 +323,7 @@ def test_migrations_are_idempotent(tmp_path):
         ).fetchone()[0] == 1
 ```
 
-- [ ] **Step 2: Run the tests to verify RED**
+- [x] **Step 2: Run the tests to verify RED**
 
 Run:
 
@@ -333,7 +333,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_sqlit
 
 Expected: FAIL because the V3 tables do not exist.
 
-- [ ] **Step 3: Implement migration version 1**
+- [x] **Step 3: Implement migration version 1**
 
 Create `sqlite_migrations.py` with an ordered `MIGRATIONS` collection. Migration 1 must create every table and both partial unique indexes:
 
@@ -423,7 +423,7 @@ MIGRATIONS = {
 
 Implement `apply_migrations(database_path)` so it creates `schema_migrations`, applies missing versions in order, records each version, and inserts `default` with `INSERT OR IGNORE`. Use UTC ISO timestamps.
 
-- [ ] **Step 4: Wire migrations and SQLite pragmas**
+- [x] **Step 4: Wire migrations and SQLite pragmas**
 
 At the end of `MemoryStore.initialize()`, call `apply_migrations(self.database_path)`. Change `_connect()` to:
 
@@ -438,7 +438,7 @@ def _connect(self) -> sqlite3.Connection:
 
 Set `PRAGMA journal_mode = WAL` once inside migration initialization, before beginning a migration transaction.
 
-- [ ] **Step 5: Run migration and legacy store tests**
+- [x] **Step 5: Run migration and legacy store tests**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_sqlite_migrations.py backend/src/tests/test_memory_store.py -q
@@ -446,7 +446,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_sqlit
 
 Expected: PASS, including repeated initialization against an existing database.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/services/sqlite_migrations.py backend/src/services/memory_store.py backend/src/tests/test_sqlite_migrations.py backend/src/tests/test_memory_store.py
@@ -2243,4 +2243,15 @@ Verification commands and results: backend pytest 202 passed, 1 warning; fronten
 Contract decisions made: kept the assistant-first workbench, memory summary, collapsed saved-paper lifecycle, and fallback query; adopted V1 typed results, stage errors, grounded-QA behavior, failure emission, and stale-result clearing without duplicating summary sections
 Known failures or blockers: none
 Next unblocked wave: Wave 2, GPT-5.4 medium, Task 2
+```
+
+```text
+Wave: 2
+Owner model: GPT-5.5 high responsibility (user-directed override to continue execution from Wave 2 in the existing V3 worktree)
+Completed task commits:
+Current worktree and branch: /Users/nuonuohu/Developer/graphReconstruction/.worktrees/agent-team-v3; codex/agent-team-v3
+Verification commands and results: migration RED reproduced on backend/src/tests/test_sqlite_migrations.py; memory-store RED reproduced on backend/src/tests/test_memory_store.py; backend pytest backend/src/tests/test_sqlite_migrations.py backend/src/tests/test_memory_store.py passed twice with 27 passed in 0.14s on the final run; spec review approved after fixing migration atomicity; code-quality review approved after replacing INSERT OR REPLACE with ON CONFLICT DO UPDATE and adding a child-row resave regression test
+Contract decisions made: kept Task 2 scope limited to versioned SQLite migrations plus connection pragmas; each migration version now applies atomically with its schema_migrations record; MemoryStore paper saves preserve existing child rows under foreign key enforcement by using UPSERT instead of REPLACE
+Known failures or blockers: none
+Next unblocked wave: Wave 3, GPT-5.5 high, Tasks 3-4
 ```
