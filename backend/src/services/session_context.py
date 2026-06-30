@@ -1,3 +1,4 @@
+import json
 from typing import Protocol
 
 from services.memory_store import MemoryStore
@@ -61,6 +62,34 @@ class DeterministicSummaryGenerator:
             if line:
                 lines.append(line)
         return "\n".join(lines)[-6000:]
+
+
+class LLMSummaryGenerator:
+    def __init__(self, chat_model):
+        self.chat_model = chat_model
+
+    def summarize(
+        self, previous_summary: str, messages: list[StoredMessage]
+    ) -> str:
+        transcript = "\n".join(
+            f"{message.role}: {json.dumps(message.content, ensure_ascii=False)}"
+            for message in messages
+        )
+        response = self.chat_model.invoke(
+            [
+                (
+                    "system",
+                    "Compress the research conversation into factual goals, decisions, "
+                    "evidence, and unresolved questions. Do not create long-term user "
+                    "memory.",
+                ),
+                (
+                    "user",
+                    f"Previous summary:\n{previous_summary}\n\nNew messages:\n{transcript}",
+                ),
+            ]
+        )
+        return str(response.content).strip()
 
 
 class SessionSummaryService:

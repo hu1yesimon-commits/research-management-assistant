@@ -5,6 +5,7 @@ import pytest
 from services.memory_store import MemoryStore
 from services.session_context import (
     DeterministicSummaryGenerator,
+    LLMSummaryGenerator,
     SessionContextBuilder,
     SessionSummaryService,
 )
@@ -237,3 +238,61 @@ def test_deterministic_summary_uses_supported_content_and_bounds_output(stores):
     assert "user: user turn 1" in summary
     assert "assistant: assistant turn 1" in summary
     assert len(summary) <= 6000
+
+
+class FakeSummaryResponse:
+    def __init__(self, content):
+        self.content = content
+
+
+class FakeSummaryChatModel:
+    def __init__(self, content=" compact summary ", error=None):
+        self.content = content
+        self.error = error
+        self.calls = []
+
+    def invoke(self, messages):
+        self.calls.append(messages)
+        if self.error is not None:
+            raise self.error
+        return FakeSummaryResponse(self.content)
+
+
+def test_llm_summary_includes_previous_summary_and_unsummarized_message_json(stores):
+    session_store, _ = stores
+    _complete_turn(session_store, 1)
+    messages = session_store.list_messages("default")
+    model = FakeSummaryChatModel()
+
+    summary = LLMSummaryGenerator(model).summarize("old factual summary", messages)
+
+    assert summary == "compact summary"
+    system_message, user_message = model.calls[0]
+    assert system_message == (
+        "system",
+        "Compress the research conversation into factual goals, decisions, evidence, and unresolved questions. Do not create long-term user memory.",
+    )
+    assert "Previous summary:\nold factual summary" in user_message[1]
+    assert 'user: {"text": "user turn 1"}' in user_message[1]
+    assert 'assistant: {"assistant_message": "assistant turn 1"}' in user_message[1]
+
+
+def test_llm_summary_provider_failure_preserves_summary_and_boundary(stores):
+    session_store, _ = stores
+    _complete_turn(session_store, 1)
+    old_messages = session_store.list_messages("default")
+    session_store.update_session_summary("default", "old summary", old_messages[-1].id)
+    for number in range(2, 8):
+        _complete_turn(session_store, number)
+    model = FakeSummaryChatModel(error=RuntimeError("provider unavailable"))
+
+    refreshed = SessionSummaryService(
+        session_store,
+        LLMSummaryGenerator(model),
+        threshold=12,
+    ).maybe_refresh("default")
+
+    session = session_store.get_session("default")
+    assert refreshed is False
+    assert session["summary"] == "old summary"
+    assert session["summary_through_message_id"] == old_messages[-1].id
