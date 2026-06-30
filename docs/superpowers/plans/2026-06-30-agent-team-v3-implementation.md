@@ -19,6 +19,70 @@
 - Use fake/deterministic providers in automated tests. Real provider checks are manual smoke tests only.
 - Run a spec review and a code-quality review after Tasks 1, 5, 10, and 14.
 
+## Model Assignment Strategy
+
+This plan uses full `gpt-5.4` for bounded implementation work and `gpt-5.5` for ambiguity-heavy integration, state invariants, orchestration, and final review. This follows Codex guidance that GPT-5.5 is the starting point for demanding multi-step agents, while GPT-5.4 remains a strong coding, reasoning, and tool-use model.
+
+Official references:
+
+- `https://developers.openai.com/codex/models`
+- `https://developers.openai.com/codex/concepts/subagents`
+
+| Wave | Owner | Tasks | Gate before continuing |
+|---|---|---|---|
+| 1 | `gpt-5.5` high | Task 1 | Converged V1 baseline passes all tests and smoke |
+| 2 | `gpt-5.4` medium | Task 2 | Migration tests and legacy store tests pass |
+| 3 | `gpt-5.5` high | Tasks 3-4 | Turn and Candidate transactional invariants pass |
+| 4 | `gpt-5.4` medium | Tasks 5-6 | Context and typed-plan tests pass; no architecture changes |
+| 5 | `gpt-5.5` high | Task 7 | Leader planning and real-provider boundaries pass review |
+| 6 | `gpt-5.4` medium | Task 8 | Agent adapters conform exactly to frozen ownership contracts |
+| 7 | `gpt-5.5` high | Tasks 9-10 | Dispatcher and ConversationService failure semantics pass |
+| 8 | `gpt-5.4` medium | Tasks 11-14 | API, frontend, Eval, build, and offline smoke pass |
+| 9 | `gpt-5.5` high | Task 15 | Final architecture and verification review passes |
+
+Do not run write-heavy waves in parallel. Both model conversations must use the same V3 worktree and branch, and each wave starts from the clean commit produced by the previous wave.
+
+### GPT-5.4 Stop Conditions
+
+GPT-5.4 must stop and hand control to GPT-5.5 when any of these occurs:
+
+- The frozen spec and current code imply different state transitions.
+- A task requires changing an Agent ownership boundary or allowed Plan type.
+- Transaction, concurrency, idempotency, timeout, or partial-failure semantics are ambiguous.
+- A prerequisite Task is incomplete or its verification is not green.
+- The implementation would require expanding into Mailbox, multi-Session UI, streaming, or free-loop behavior.
+
+GPT-5.4 may fix ordinary test failures within the assigned task when the expected contract is explicit.
+
+### Model Handoff Record
+
+At the end of every wave, append a short entry to the plan's `Execution Log` containing:
+
+```text
+Wave:
+Owner model:
+Completed task commits:
+Current worktree and branch:
+Verification commands and results:
+Contract decisions made:
+Known failures or blockers:
+Next unblocked wave:
+```
+
+The receiving model must inspect `git status`, the listed commits, and the recorded verification before spawning implementation subagents.
+
+### Copy-Safe GPT-5.4 Instruction
+
+```text
+在现有 Agent Team V3 worktree 中，按 docs/superpowers/plans/2026-06-30-agent-team-v3-implementation.md 使用 subagent-driven-development + TDD 执行当前已解锁且 Owner Model 为 gpt-5.4 的波次。每个 Task 使用 fresh subagent，并依次做规格复核和代码质量复核。开始前核对上一波 commit、git status 和验证记录；不得跳过依赖，不得修改冻结架构、Agent ownership、Plan 类型或状态机语义。完成当前连续可执行的 gpt-5.4 波次后，运行计划要求的验证，提交改动，填写 Execution Log，然后在下一个 gpt-5.5 波次前停止。
+```
+
+### Copy-Safe GPT-5.5 Instruction
+
+```text
+在现有 Agent Team V3 worktree 中，按 docs/superpowers/plans/2026-06-30-agent-team-v3-implementation.md 使用 subagent-driven-development + TDD 执行当前已解锁且 Owner Model 为 gpt-5.5 的波次。每个 Task 使用 fresh subagent，并依次做规格复核和代码质量复核。开始前核对上一波 commit、git status 和验证记录；重点验证分支收敛、事务原子性、Candidate/Session 状态机、Planner/Validator、Agent ownership、超时、幂等和部分失败语义。完成当前连续可执行的 gpt-5.5 波次后，运行计划要求的验证，提交改动，填写 Execution Log，然后在下一个 gpt-5.4 波次前停止。
+```
+
 ## User Review Gates
 
 - After Task 5, the user reviews Candidate expiration, refresh suppression, Session context, and Memory boundaries.
@@ -81,10 +145,15 @@
 - Create `frontend/src/components/__tests__/ActiveCandidatesPanel.test.js`.
 - Modify `frontend/src/components/__tests__/ResearchWorkbench.test.js`.
 - Modify `backend/scripts/smoke_offline_mvp.sh`.
+- Create `docs/superpowers/reviews/2026-06-30-agent-team-v3-final-review.md`: GPT-5.5 final architecture and verification decision.
 
 ---
 
 ### Task 1: Converge Agent V1 And Assistant-First Frontend
+
+**Owner Model:** `gpt-5.5`, reasoning `high`
+**Prerequisite:** Plan commit is present; isolated V3 worktree is clean.
+**Escalate/Stop:** Stop if conflicts extend beyond the listed integration surface or require changing the frozen V3 contract.
 
 **Files:**
 - Merge: branch `codex/agent-system-v1-refactor`
@@ -198,6 +267,10 @@ git commit -m "merge: converge agent v1 and assistant workbench"
 ---
 
 ### Task 2: Add Versioned SQLite Migrations And Default Session
+
+**Owner Model:** `gpt-5.4`, reasoning `medium`
+**Prerequisite:** Task 1 converged baseline is committed and green.
+**Escalate/Stop:** Stop on any need to reinterpret existing user data or change Candidate/Session semantics.
 
 **Files:**
 - Create: `backend/src/services/sqlite_migrations.py`
@@ -384,6 +457,10 @@ git commit -m "feat: add versioned session migrations"
 
 ### Task 3: Implement Session Turn And Message Persistence
 
+**Owner Model:** `gpt-5.5`, reasoning `high`
+**Prerequisite:** Task 2 migration schema is committed and idempotent.
+**Escalate/Stop:** Resolve transaction, concurrency, replay, and failure-state ambiguity here; do not defer it to API wiring.
+
 **Files:**
 - Create: `backend/src/services/session_schemas.py`
 - Create: `backend/src/services/session_store.py`
@@ -557,6 +634,10 @@ git commit -m "feat: persist session turns and messages"
 
 ### Task 4: Implement Candidate Lifecycle And Real Refresh Semantics
 
+**Owner Model:** `gpt-5.5`, reasoning `high`
+**Prerequisite:** Task 3 atomic Turn start and message persistence are green.
+**Escalate/Stop:** Stop if Accept cannot remain atomic with Paper persistence or refresh needs a permanent blacklist.
+
 **Files:**
 - Create: `backend/src/services/candidate_lifecycle.py`
 - Create: `backend/src/tests/test_candidate_lifecycle.py`
@@ -709,6 +790,10 @@ git commit -m "feat: add session candidate lifecycle"
 
 ### Task 5: Add Context Windows And Rolling Session Summaries
 
+**Owner Model:** `gpt-5.4`, reasoning `medium`
+**Prerequisite:** Tasks 3-4 are committed; Session and Candidate state semantics are frozen.
+**Escalate/Stop:** Stop if context construction would merge Session history, Agent Context, Confirmed Memory, or vector knowledge into one store.
+
 **Files:**
 - Create: `backend/src/services/session_context.py`
 - Create: `backend/src/tests/test_session_context.py`
@@ -804,6 +889,10 @@ git commit -m "feat: build bounded session context"
 ---
 
 ### Task 6: Define Typed Agent Plans And Deterministic Validation
+
+**Owner Model:** `gpt-5.4`, reasoning `medium`
+**Prerequisite:** Task 5 context contracts are committed.
+**Escalate/Stop:** Do not add Plan types, Actions, dynamic Agents, loops, or persistence actions beyond the frozen allowlist.
 
 **Files:**
 - Create: `backend/src/agent_team/__init__.py`
@@ -962,6 +1051,10 @@ git commit -m "feat: define bounded agent plans"
 ---
 
 ### Task 7: Implement Leader Planning, Few-Shot Prompts, And Response Generation
+
+**Owner Model:** `gpt-5.5`, reasoning `high`
+**Prerequisite:** Task 6 typed schemas and Validator are green.
+**Escalate/Stop:** Stop if prompting alone is being used as a hard guarantee or if provider wiring bypasses typed validation.
 
 **Files:**
 - Create: `backend/src/agent_team/prompts.py`
@@ -1150,6 +1243,10 @@ git commit -m "feat: add bounded leader planner"
 
 ### Task 8: Implement Research And Idea Agent Adapters
 
+**Owner Model:** `gpt-5.4`, reasoning `medium`
+**Prerequisite:** Task 7 Planner contracts and provider boundaries are committed.
+**Escalate/Stop:** Stop if Idea would own fresh Discovery, Research would auto-Accept, or an adapter needs to change the main architecture.
+
 **Files:**
 - Create: `backend/src/agent_team/research_agent.py`
 - Create: `backend/src/agent_team/idea_agent.py`
@@ -1255,6 +1352,10 @@ git commit -m "feat: add research and idea agents"
 
 ### Task 9: Add The Direct Synchronous Dispatcher And Agent Run Persistence
 
+**Owner Model:** `gpt-5.5`, reasoning `high`
+**Prerequisite:** Task 8 adapters conform to the frozen Agent ownership boundary.
+**Escalate/Stop:** Resolve dependency skipping, timeout, unexpected-exception, and Agent Run terminal-state semantics before continuing.
+
 **Files:**
 - Create: `backend/src/agent_team/dispatcher.py`
 - Modify: `backend/src/tests/test_agent_dispatcher.py`
@@ -1346,6 +1447,10 @@ git commit -m "feat: dispatch synchronous agent tasks"
 ---
 
 ### Task 10: Implement ConversationService Turn Orchestration
+
+**Owner Model:** `gpt-5.5`, reasoning `high`
+**Prerequisite:** Task 9 direct dispatcher and Agent Run persistence are green.
+**Escalate/Stop:** Stop if orchestration requires a free loop, hidden background execution, or restoring expired Candidates after failure.
 
 **Files:**
 - Create: `backend/src/services/conversation_service.py`
@@ -1471,6 +1576,10 @@ git commit -m "feat: orchestrate persistent agent turns"
 
 ### Task 11: Expose Session, Candidate, And Saved Paper APIs
 
+**Owner Model:** `gpt-5.4`, reasoning `medium`
+**Prerequisite:** Task 10 service contracts and error semantics are committed.
+**Escalate/Stop:** Stop if HTTP wiring would change domain semantics instead of mapping typed service outcomes.
+
 **Files:**
 - Modify: `backend/src/main.py`
 - Create: `backend/src/tests/test_session_api.py`
@@ -1560,6 +1669,10 @@ git commit -m "feat: expose persistent session api"
 ---
 
 ### Task 12: Build The Session Chat Frontend
+
+**Owner Model:** `gpt-5.4`, reasoning `medium`
+**Prerequisite:** Task 11 Session API tests are green.
+**Escalate/Stop:** Do not add multi-Session navigation, independent Agent chats, or streaming behavior.
 
 **Files:**
 - Modify: `frontend/src/api.js`
@@ -1668,6 +1781,10 @@ git commit -m "feat: add persistent session chat"
 
 ### Task 13: Add Active Candidate, Saved Paper, And Agent Trace UI
 
+**Owner Model:** `gpt-5.4`, reasoning `medium`
+**Prerequisite:** Task 12 default Session chat is committed and green.
+**Escalate/Stop:** Stop if the UI must infer domain state not returned by the API or makes expired history actionable.
+
 **Files:**
 - Create: `frontend/src/components/ActiveCandidatesPanel.vue`
 - Create: `frontend/src/components/AgentTracePanel.vue`
@@ -1760,6 +1877,10 @@ git commit -m "feat: separate active candidates and saved papers"
 ---
 
 ### Task 14: Add Planner Eval, Offline Session Smoke, And Documentation
+
+**Owner Model:** `gpt-5.4`, reasoning `medium`
+**Prerequisite:** Tasks 11-13 pass backend API, frontend component, and build tests.
+**Escalate/Stop:** The user must review Eval labels; stop if documentation would overclaim Mailbox, multi-Session, autonomy, or production scale.
 
 **Files:**
 - Create: `backend/src/evals/leader_planner_cases.json`
@@ -1982,11 +2103,133 @@ git commit -m "test: verify agent team v3 workflow"
 
 ---
 
+### Task 15: Final Architecture, Concurrency, And Failure-Semantics Review
+
+**Owner Model:** `gpt-5.5`, reasoning `high`
+**Prerequisite:** Task 14 commit exists; all backend, frontend, build, Eval, and offline smoke checks are green.
+**Escalate/Stop:** Do not approve completion while any state transition, persistence boundary, Agent ownership rule, or required verification remains uncertain.
+
+**Files:**
+- Create: `docs/superpowers/reviews/2026-06-30-agent-team-v3-final-review.md`
+- Modify only when a finding requires a fix: files introduced or changed by Tasks 1-14
+- Test: relevant focused regression test for every code fix
+
+- [ ] **Step 1: Verify the handoff and commit chain**
+
+Run:
+
+```bash
+git status --short --branch
+git log --oneline --decorate --max-count=20
+git diff --check
+```
+
+Expected: clean V3 worktree, all wave commits present in order, and no diff-check errors.
+
+- [ ] **Step 2: Dispatch four read-only review subagents**
+
+Use fresh review agents with these non-overlapping scopes:
+
+```text
+Reviewer A: Trace every V3 spec success criterion to code and tests; report missing or contradictory behavior with file references.
+Reviewer B: Audit SQLite transactions, one-running-Turn enforcement, idempotent replay, Candidate expiration/Accept, WAL/busy timeout, and failure terminal states.
+Reviewer C: Audit typed Planner/Validator, Agent ownership, coverage routing, Research-to-Idea evidence transfer, timeouts, and prohibition of loops/dynamic Agents/auto-Accept.
+Reviewer D: Audit FastAPI mappings and Vue behavior for history pagination, active-vs-saved separation, 409 expiry, stale UI clearing, trace safety, and legacy compatibility.
+```
+
+Each reviewer returns only evidence-backed findings categorized as blocking, important, or optional. Reviewers do not edit files.
+
+- [ ] **Step 3: Consolidate findings against frozen invariants**
+
+Treat these as blocking:
+
+- More than one running Turn per Session can be created.
+- A failed new Turn restores an expired Candidate.
+- An expired Candidate can be accepted.
+- Saved Paper write and Candidate Accept are not atomic or idempotent.
+- Idea initiates fresh Discovery or creates Candidate Batches.
+- Leader executes an unvalidated plan or unknown Action.
+- Research failure does not skip a dependent Idea step.
+- Provider failure is mislabeled as no evidence.
+- Full permanent history is inserted into Agent context.
+- Automated verification requires live network providers.
+
+- [ ] **Step 4: Fix blocking or important findings with focused RED/GREEN loops**
+
+For each accepted finding:
+
+1. Add one focused regression test in the owning test file.
+2. Run only that test and confirm RED for the reported behavior.
+3. Apply the smallest fix without expanding the frozen scope.
+4. Re-run the focused test and the owning test module.
+5. Record the finding, test, fix, and result in the review document.
+
+Optional findings are documented but not implemented unless they directly improve correctness without expanding scope.
+
+- [ ] **Step 5: Run final independent verification**
+
+```bash
+PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests -q
+cd frontend
+npm test
+npm run build
+cd ..
+backend/scripts/smoke_offline_mvp.sh
+git diff --check
+git status --short
+```
+
+Expected: all tests and build PASS; smoke prints `OFFLINE_MVP_SMOKE_OK=true` and `AGENT_TEAM_V3_SMOKE_OK=true`; only the review report and intentional review fixes are uncommitted.
+
+- [ ] **Step 6: Write the final review report**
+
+Use these sections in `2026-06-30-agent-team-v3-final-review.md`:
+
+```markdown
+# Agent Team V3 Final Review
+
+## Reviewed Commit Range
+## Spec Traceability Result
+## Transaction And Concurrency Result
+## Planner And Agent Boundary Result
+## API And Frontend Result
+## Findings Fixed
+## Accepted Optional Findings
+## Verification Evidence
+## Final Decision
+```
+
+`Final Decision` must be either `approved` or `not approved`, followed by concrete evidence. Do not use conditional approval wording.
+
+- [ ] **Step 7: Commit the review and any verified fixes**
+
+```bash
+git add backend frontend docs/superpowers/reviews/2026-06-30-agent-team-v3-final-review.md
+git commit -m "review: verify agent team v3 architecture"
+```
+
+---
+
 ## Post-Implementation Handoff
 
-After Task 14:
+After Task 15:
 
 1. Use `superpowers:verification-before-completion` and record exact backend, frontend, build, smoke, and diff-check output.
 2. Use `superpowers:requesting-code-review` for final spec and code-quality review.
 3. Use `superpowers:finishing-a-development-branch` to choose local merge, push/PR, or worktree cleanup.
 4. Do not begin multi-Session or SQLite Mailbox work without a separate approved spec and plan.
+
+## Execution Log
+
+Append one record after each completed model wave. Never rewrite earlier records; corrections are added as a new record.
+
+```text
+Wave:
+Owner model:
+Completed task commits:
+Current worktree and branch:
+Verification commands and results:
+Contract decisions made:
+Known failures or blockers:
+Next unblocked wave:
+```
