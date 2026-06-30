@@ -466,7 +466,7 @@ git commit -m "feat: add versioned session migrations"
 - Create: `backend/src/services/session_store.py`
 - Create: `backend/src/tests/test_session_store.py`
 
-- [ ] **Step 1: Define session contracts and failing tests**
+- [x] **Step 1: Define session contracts and failing tests**
 
 Add these contracts to `session_schemas.py`:
 
@@ -512,7 +512,7 @@ def test_second_running_turn_is_rejected(store):
         store.start_turn("default", "request-2", {"text": "second"})
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_session_store.py -q
@@ -520,7 +520,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_sessi
 
 Expected: FAIL because `SessionStore` does not exist.
 
-- [ ] **Step 3: Implement atomic turn start**
+- [x] **Step 3: Implement atomic turn start**
 
 `SessionStore.start_turn()` must use `BEGIN IMMEDIATE` and perform operations in this order:
 
@@ -564,7 +564,7 @@ connection.commit()
 return StartTurnResult(turn_id=turn_id, status="running", replayed=False)
 ```
 
-- [ ] **Step 4: Implement completion, failure, pagination, and recent-turn reads**
+- [x] **Step 4: Implement completion, failure, pagination, and recent-turn reads**
 
 Implement these public methods:
 
@@ -615,7 +615,7 @@ def complete_turn(self, turn_id: str, assistant_content: dict, plan: dict) -> No
 
 `list_messages()` must query `id < before_id` when a cursor is present, order by `id DESC` with `LIMIT`, then reverse the rows before returning them so each page renders chronologically. `list_recent_turn_messages()` must select the six newest completed Turn IDs and return their messages ordered by message ID.
 
-- [ ] **Step 5: Verify persistence behavior**
+- [x] **Step 5: Verify persistence behavior**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_session_store.py -q
@@ -623,7 +623,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_sessi
 
 Expected: PASS for idempotency, busy rejection, ordering, pagination, completion replay, and failure persistence.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/services/session_schemas.py backend/src/services/session_store.py backend/src/tests/test_session_store.py
@@ -644,7 +644,7 @@ git commit -m "feat: persist session turns and messages"
 - Modify: `backend/src/services/memory_store.py`
 - Modify: `backend/src/tests/test_memory_store.py`
 
-- [ ] **Step 1: Write failing Candidate state tests**
+- [x] **Step 1: Write failing Candidate state tests**
 
 Cover all required transitions:
 
@@ -674,7 +674,7 @@ def test_expired_candidate_cannot_be_accepted(candidate_service, expired_candida
         candidate_service.accept("default", expired_candidate.id)
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_candidate_lifecycle.py -q
@@ -682,7 +682,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_candi
 
 Expected: FAIL because the lifecycle service is missing.
 
-- [ ] **Step 3: Implement stable paper keys and freshness filtering**
+- [x] **Step 3: Implement stable paper keys and freshness filtering**
 
 Use normalized DOI first, then `paper_id`:
 
@@ -748,7 +748,7 @@ class SavedPaper(BaseModel):
 
 `suppression_keys()` must combine global Saved Papers in `accepted|uploaded|chunked|embedded` with the most recent expired Batch in the same Session. `filter_fresh()` must return fewer than `top_k` rather than refill with suppressed papers.
 
-- [ ] **Step 4: Implement transactional Accept**
+- [x] **Step 4: Implement transactional Accept**
 
 Inside one `BEGIN IMMEDIATE` transaction:
 
@@ -761,7 +761,7 @@ Inside one `BEGIN IMMEDIATE` transaction:
 7. Mark Candidate Item `accepted` with `accepted_paper_id`.
 8. Commit.
 
-- [ ] **Step 5: Fix saved-paper and DOI semantics**
+- [x] **Step 5: Fix saved-paper and DOI semantics**
 
 Add `MemoryStore.list_saved_papers(limit=100)` filtering:
 
@@ -771,7 +771,7 @@ WHERE p.status IN ('accepted', 'uploaded', 'chunked', 'embedded')
 
 Change `list_known_dois()` to use the same four statuses. Do not return legacy `papers.status='candidate'` from the new Saved Papers method.
 
-- [ ] **Step 6: Verify Candidate and paper behavior**
+- [x] **Step 6: Verify Candidate and paper behavior**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_candidate_lifecycle.py backend/src/tests/test_memory_store.py -q
@@ -779,7 +779,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_candi
 
 Expected: PASS for expiration, suppression, under-filled fresh results, Accept idempotency, 409-domain error, and Saved Paper filtering.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/src/services/candidate_lifecycle.py backend/src/services/memory_store.py backend/src/tests/test_candidate_lifecycle.py backend/src/tests/test_memory_store.py
@@ -2254,4 +2254,15 @@ Verification commands and results: migration RED reproduced on backend/src/tests
 Contract decisions made: kept Task 2 scope limited to versioned SQLite migrations plus connection pragmas; each migration version now applies atomically with its schema_migrations record; MemoryStore paper saves preserve existing child rows under foreign key enforcement by using UPSERT instead of REPLACE
 Known failures or blockers: none
 Next unblocked wave: Wave 3, GPT-5.5 high, Tasks 3-4
+```
+
+```text
+Wave: 3
+Owner model: GPT-5.5 high responsibility
+Completed task commits: cd63ca81f9a67d409fbd8f6977488dc1271f5ae6; 659e304f8b9727385c9f44fc8c357bcdb55ab12f; prior Wave 2 task commit was 6732527398af4ec3df463f642bce7b141d3e0d5d
+Current worktree and branch: /Users/nuonuohu/Developer/graphReconstruction/.worktrees/agent-team-v3; codex/agent-team-v3
+Verification commands and results: backend pytest backend/src/tests/test_session_store.py passed with 11 passed in 0.09s; backend pytest backend/src/tests/test_candidate_lifecycle.py backend/src/tests/test_memory_store.py passed with 30 passed in 0.19s; cross-task backend pytest backend/src/tests/test_session_store.py backend/src/tests/test_candidate_lifecycle.py backend/src/tests/test_memory_store.py passed with 41 passed in 0.23s; git diff --check passed
+Contract decisions made: Session turns now own idempotent replay, single-running-turn enforcement, persisted assistant responses, failure persistence, recent-turn reads, agent contexts, and agent run storage; Session candidates now expire on the next turn, suppression combines global saved papers with the latest expired batch, Accept is atomic and idempotent, and Saved Papers stay global with statuses limited to accepted|uploaded|chunked|embedded
+Known failures or blockers: Task 3 was recovered from a subagent usage-limit interruption by validating the partial implementation in the main thread; no remaining functional blocker
+Next unblocked wave: Wave 4, GPT-5.4 medium, Tasks 5-6
 ```
