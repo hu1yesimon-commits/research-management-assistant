@@ -811,6 +811,47 @@ class MemoryStore:
             "updated_at": row["updated_at"],
         }
 
+    def list_saved_papers(self, limit: int = 100) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    paper_id,
+                    title,
+                    doi,
+                    source,
+                    abstract,
+                    authors_json,
+                    metadata_json,
+                    status,
+                    pdf_path,
+                    created_at,
+                    updated_at
+                FROM papers
+                WHERE status IN ('accepted', 'uploaded', 'chunked', 'embedded')
+                ORDER BY updated_at DESC, paper_id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            {
+                "paper_id": row["paper_id"],
+                "title": row["title"],
+                "doi": row["doi"],
+                "source": row["source"],
+                "abstract": row["abstract"],
+                "authors": self._from_json(row["authors_json"]),
+                "metadata": self._from_json(row["metadata_json"]),
+                "status": row["status"],
+                "pdf_path": row["pdf_path"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     def update_paper_status(self, paper_id: str, status: str, pdf_path: str | None = None) -> None:
         existing = self._get_existing_paper(paper_id)
         if existing is None:
@@ -834,7 +875,7 @@ class MemoryStore:
                 """
                 SELECT DISTINCT doi
                 FROM papers
-                WHERE status IN ('uploaded', 'chunked', 'embedded')
+                WHERE status IN ('accepted', 'uploaded', 'chunked', 'embedded')
                   AND doi IS NOT NULL
                   AND doi != ''
                 ORDER BY doi ASC

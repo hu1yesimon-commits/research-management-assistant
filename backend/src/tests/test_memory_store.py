@@ -406,6 +406,22 @@ def test_list_known_dois_only_returns_uploaded_chunked_and_embedded(tmp_path):
     ]
 
 
+def test_list_saved_papers_filters_out_candidate_status(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+
+    store.save_candidate_paper(make_paper("candidate", "10.1000/candidate"))
+    store.save_candidate_paper(make_paper("accepted", "10.1000/accepted"))
+    store.save_candidate_paper(make_paper("uploaded", "10.1000/uploaded"))
+    store.update_paper_status("accepted", "accepted")
+    store.update_paper_status("uploaded", "uploaded", pdf_path="/tmp/uploaded.pdf")
+
+    assert [paper["paper_id"] for paper in store.list_saved_papers()] == [
+        "uploaded",
+        "accepted",
+    ]
+
+
 def test_insert_and_list_knowledge_chunks_by_paper_id(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
