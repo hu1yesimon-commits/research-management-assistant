@@ -42,7 +42,7 @@ class PlannerInput(BaseModel):
 
 
 class ResearchResult(BaseModel):
-    enabled: Literal[True] = True
+    enabled: bool = True
     batch_id: str | None = None
     requested_top_k: int
     returned_count: int

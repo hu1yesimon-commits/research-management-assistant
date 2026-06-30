@@ -1,7 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from agent_team.contracts import LeaderPlan, PlanStep, PlannerInput
+import agent_team.validator as plan_validator
+from agent_team.contracts import LeaderPlan, PlanStep, PlannerInput, ResearchResult
 from agent_team.validator import PlanValidationError, validate_plan
 from services.schemas import ExperimentLogRequest
 from services.session_schemas import SessionContext
@@ -124,6 +125,16 @@ def test_plan_schema_rejects_unknown_action():
         PlanStep(id="unknown-1", agent="knowledge", action="unknown")
 
 
+def test_research_result_enabled_is_a_bool_and_accepts_false():
+    result = ResearchResult(
+        enabled=False,
+        requested_top_k=5,
+        returned_count=0,
+    )
+
+    assert result.enabled is False
+
+
 @pytest.mark.parametrize("plan_type", ["idea", "research_then_idea"])
 def test_validate_plan_requires_experiment_log_for_idea_plans(plan_type):
     steps = [PlanStep(id="idea-1", agent="idea", action="generate_ideas")]
@@ -240,20 +251,31 @@ def test_validate_plan_enforces_clarify_requirements(plan):
         validate_plan(plan, _planner_input())
 
 
-@pytest.mark.parametrize(
-    "plan",
-    [
-        LeaderPlan(goal="flag forbidden", plan_type="direct_reply", needs_clarification=True),
-        LeaderPlan(
-            goal="question forbidden",
-            plan_type="direct_reply",
-            clarification_question="Unexpected question",
-        ),
-    ],
-)
-def test_validate_plan_rejects_clarification_fields_for_other_plans(plan):
+def test_validate_plan_rejects_clarification_flag_for_other_plans():
+    plan = LeaderPlan(goal="flag forbidden", plan_type="direct_reply", needs_clarification=True)
+
     with pytest.raises(PlanValidationError, match="clarif"):
         validate_plan(plan, _planner_input())
+
+
+def test_validate_plan_allows_clarification_question_for_other_plans_when_flag_is_false():
+    plan = LeaderPlan(
+        goal="reply",
+        plan_type="direct_reply",
+        clarification_question="Optional planner context",
+    )
+
+    assert validate_plan(plan, _planner_input()) is plan
+
+
+def test_plan_validator_validates_with_only_experiment_log_context():
+    plan = LeaderPlan(
+        goal="ideas",
+        plan_type="idea",
+        steps=[PlanStep(id="idea-1", agent="idea", action="generate_ideas")],
+    )
+
+    assert plan_validator.PlanValidator().validate(plan, experiment_log=_experiment_log()) is plan
 
 
 def test_plan_schema_rejects_more_than_two_steps():

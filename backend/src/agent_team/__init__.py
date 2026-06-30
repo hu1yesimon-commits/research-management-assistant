@@ -13,7 +13,7 @@ from agent_team.contracts import (
     PlanType,
     ResearchResult,
 )
-from agent_team.validator import PlanValidationError, validate_plan
+from agent_team.validator import PlanValidationError, PlanValidator, validate_plan
 
 __all__ = [
     "AgentAction",
@@ -27,6 +27,7 @@ __all__ = [
     "PlanStep",
     "PlanType",
     "PlanValidationError",
+    "PlanValidator",
     "ResearchResult",
     "validate_plan",
 ]
