@@ -8,6 +8,9 @@ from uuid import uuid4
 from services.session_schemas import StartTurnResult, StoredMessage
 
 
+_UNSPECIFIED_BOUNDARY = object()
+
+
 class SessionBusyError(RuntimeError):
     def __init__(self, session_id: str):
         self.session_id = session_id
@@ -341,17 +344,54 @@ class SessionStore:
         return int(row["message_count"])
 
     def update_session_summary(
-        self, session_id: str, summary: str, through_message_id: int
-    ) -> None:
+        self,
+        session_id: str,
+        summary: str,
+        through_message_id: int,
+        expected_through_message_id: int | None | object = _UNSPECIFIED_BOUNDARY,
+    ) -> bool:
         with self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE sessions
-                SET summary = ?, summary_through_message_id = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (summary, through_message_id, self._now(), session_id),
-            )
+            if expected_through_message_id is _UNSPECIFIED_BOUNDARY:
+                cursor = connection.execute(
+                    """
+                    UPDATE sessions
+                    SET summary = ?, summary_through_message_id = ?, updated_at = ?
+                    WHERE id = ?
+                      AND (
+                          summary_through_message_id IS NULL
+                          OR summary_through_message_id < ?
+                      )
+                    """,
+                    (
+                        summary,
+                        through_message_id,
+                        self._now(),
+                        session_id,
+                        through_message_id,
+                    ),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    UPDATE sessions
+                    SET summary = ?, summary_through_message_id = ?, updated_at = ?
+                    WHERE id = ?
+                      AND summary_through_message_id IS ?
+                      AND (
+                          summary_through_message_id IS NULL
+                          OR summary_through_message_id < ?
+                      )
+                    """,
+                    (
+                        summary,
+                        through_message_id,
+                        self._now(),
+                        session_id,
+                        expected_through_message_id,
+                        through_message_id,
+                    ),
+                )
+        return cursor.rowcount == 1
 
     def get_agent_context(self, session_id: str, agent_name: str) -> str:
         with self._connect() as connection:

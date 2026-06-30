@@ -90,7 +90,9 @@ class SessionSummaryService:
         except Exception:
             return False
 
-        self.session_store.update_session_summary(
-            session_id, replacement, messages[-1].id
+        return self.session_store.update_session_summary(
+            session_id,
+            replacement,
+            messages[-1].id,
+            expected_through_message_id=session["summary_through_message_id"],
         )
-        return True

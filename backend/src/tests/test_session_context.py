@@ -117,6 +117,16 @@ class RecordingSummaryGenerator:
         return self.result
 
 
+class InterleavingSummaryGenerator:
+    def __init__(self, callback, result):
+        self.callback = callback
+        self.result = result
+
+    def summarize(self, previous_summary, messages):
+        self.callback()
+        return self.result
+
+
 def test_summary_refresh_waits_until_twelve_unsummarized_messages(stores):
     session_store, _ = stores
     for number in range(1, 6):
@@ -186,6 +196,34 @@ def test_summary_generator_failure_preserves_summary_and_boundary(stores):
     assert refreshed is False
     assert session["summary"] == "old summary"
     assert session["summary_through_message_id"] == old_messages[-1].id
+
+
+def test_stale_summary_refresh_cannot_overwrite_newer_refresh(stores):
+    session_store, _ = stores
+    for number in range(1, 7):
+        _complete_turn(session_store, number)
+    stale_through_message_id = session_store.list_messages("default")[-1].id
+
+    def commit_newer_refresh():
+        for number in range(7, 13):
+            _complete_turn(session_store, number)
+        newer_generator = RecordingSummaryGenerator(result="newer summary")
+        assert SessionSummaryService(
+            session_store, newer_generator, threshold=12
+        ).maybe_refresh("default") is True
+
+    stale_generator = InterleavingSummaryGenerator(
+        commit_newer_refresh, result="stale summary"
+    )
+
+    refreshed = SessionSummaryService(
+        session_store, stale_generator, threshold=12
+    ).maybe_refresh("default")
+
+    session = session_store.get_session("default")
+    assert refreshed is False
+    assert session["summary"] == "newer summary"
+    assert session["summary_through_message_id"] > stale_through_message_id
 
 
 def test_deterministic_summary_uses_supported_content_and_bounds_output(stores):
