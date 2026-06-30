@@ -268,6 +268,17 @@ class MemoryStore:
 
         return "\n".join(lines)
 
+    def build_confirmed_memory_context(self) -> str:
+        lines = ["Confirmed semantic memory:"]
+        for memory in self.list_semantic_memory(status="confirmed"):
+            lines.append(
+                "- "
+                f"[{memory['category']}/{memory['predicate']}] "
+                f"{memory['subject']} {memory['predicate']} {memory['object']}: "
+                f"{memory['summary']}"
+            )
+        return "\n".join(lines)
+
     def upsert_memory_candidate(self, candidate: dict) -> int:
         now = self._now()
         source_log_ids = candidate.get("source_log_ids", [])

@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from services.schemas import JudgeResult, PaperMetadata
+from services.schemas import JudgeResult, KnowledgeSearchResult, PaperMetadata
 
 
 class StartTurnResult(BaseModel):
@@ -19,6 +19,15 @@ class StoredMessage(BaseModel):
     agent_name: str | None = None
     content: dict
     created_at: str
+
+
+class SessionContext(BaseModel):
+    session_id: str
+    session_summary: str = ""
+    recent_messages: list[StoredMessage] = Field(default_factory=list)
+    confirmed_memory: str = ""
+    agent_contexts: dict[str, str] = Field(default_factory=dict)
+    current_knowledge: list[KnowledgeSearchResult] = Field(default_factory=list)
 
 
 class MessagePage(BaseModel):

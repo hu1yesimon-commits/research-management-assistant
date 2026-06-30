@@ -255,6 +255,41 @@ class SessionStore:
 
         return [self._stored_message(row) for row in reversed(rows)]
 
+    def get_session(self, session_id: str) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, title, summary, summary_through_message_id, status,
+                       created_at, updated_at
+                FROM sessions
+                WHERE id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+
+        return None if row is None else dict(row)
+
+    def list_unsummarized_messages(self, session_id: str) -> list[StoredMessage]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT messages.id, messages.session_id, messages.turn_id,
+                       messages.role, messages.agent_name,
+                       messages.content_json, messages.created_at
+                FROM messages
+                JOIN sessions ON sessions.id = messages.session_id
+                WHERE messages.session_id = ?
+                  AND (
+                      sessions.summary_through_message_id IS NULL
+                      OR messages.id > sessions.summary_through_message_id
+                  )
+                ORDER BY messages.id
+                """,
+                (session_id,),
+            ).fetchall()
+
+        return [self._stored_message(row) for row in rows]
+
     def list_recent_turn_messages(
         self, session_id: str, turn_limit: int = 6
     ) -> list[StoredMessage]:
