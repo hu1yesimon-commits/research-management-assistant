@@ -79,7 +79,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["success"]);
+const emit = defineEmits(["success", "failure"]);
 
 const form = reactive({
   query: "",
@@ -119,6 +119,7 @@ async function submitAssistant() {
     emit("success", result);
   } catch (requestError) {
     error.value = requestError.message || "Assistant request failed";
+    emit("failure");
   } finally {
     isBusy.value = false;
   }

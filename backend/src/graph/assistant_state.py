@@ -17,6 +17,7 @@ class ResearchAssistantState(TypedDict):
     save_log: bool
     include_discovery: bool
     memory_context: str
+    coverage_retrieval_results: list[dict] | None
     coverage_score: float
     mode: AssistantMode
     route: AssistantRoute
@@ -24,6 +25,9 @@ class ResearchAssistantState(TypedDict):
     discovery: dict
     knowledge: dict
     ideas: list[dict]
+    discovery_result: dict
+    knowledge_result: dict
+    idea_result: dict
     assistant_message: str
     next_action: dict | None
     suggested_user_actions: list[str]

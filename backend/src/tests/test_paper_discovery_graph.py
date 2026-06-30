@@ -1,4 +1,7 @@
+import pytest
+
 from graph.builder import build_paper_discovery_graph
+from graph.errors import DiscoveryStageError
 from services.memory_store import MemoryStore
 from services.query_rewriter import QueryRewriter
 from services.schemas import JudgeResult, PaperId, PaperMetadata
@@ -52,6 +55,25 @@ class PartiallyFailingJudge(FakeJudge):
         if paper.paper_id == "paper-broken":
             raise RuntimeError("synthetic judge failure for paper-broken")
         return super().judge(query=query, paper=paper)
+
+
+class FailingQueryRewriter:
+    def rewrite(self, mode: str, user_query: str, memory_context: str = "") -> list[str]:
+        raise RuntimeError("query rewrite provider unavailable")
+
+
+class RecordingQueryRewriter:
+    def __init__(self):
+        self.memory_contexts: list[str] = []
+
+    def rewrite(self, mode: str, user_query: str, memory_context: str = "") -> list[str]:
+        self.memory_contexts.append(memory_context)
+        return [user_query]
+
+
+class RankFailingJudge(FakeJudge):
+    def sort_by_final_score(self, results: list[JudgeResult]) -> list[JudgeResult]:
+        raise RuntimeError("ranking failed")
 
 
 def test_basic_paper_discovery_graph_returns_ranked_candidates_without_persisting(tmp_path):
@@ -132,6 +154,90 @@ def test_advanced_graph_uses_memory_context_for_rewritten_queries(tmp_path):
     assert "graph reconstruction interpretability" in result["rewritten_queries"]
 
 
+def test_paper_discovery_graph_preserves_supplied_memory_snapshot(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.add_experiment_log_entry(
+        {
+            "task": "store context",
+            "model": "store model",
+            "dataset": "store dataset",
+            "metric_problem": "store metric",
+            "tried_methods": [],
+            "observation": "store observation",
+            "goal": "store goal",
+            "tags": ["store"],
+        }
+    )
+    supplied_snapshot = "Confirmed semantic memory: supplied by assistant graph"
+    rewriter = RecordingQueryRewriter()
+    graph = build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=FakeJudge(),
+        memory_store=store,
+        query_rewriter=rewriter,
+    )
+
+    result = graph.invoke(
+        {
+            "mode": "advanced",
+            "user_query": "graph reconstruction",
+            "memory_context": supplied_snapshot,
+            "rewritten_queries": [],
+            "raw_results": [],
+            "normalized_papers": [],
+            "deduped_papers": [],
+            "judge_results": [],
+            "ranked_candidates": [],
+        }
+    )
+
+    assert result["memory_context"] == supplied_snapshot
+    assert rewriter.memory_contexts == [supplied_snapshot]
+
+
+def test_paper_discovery_graph_preserves_authoritative_empty_memory_snapshot(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    store.add_experiment_log_entry(
+        {
+            "task": "store context",
+            "model": "store model",
+            "dataset": "store dataset",
+            "metric_problem": "store metric",
+            "tried_methods": [],
+            "observation": "store observation",
+            "goal": "store goal",
+            "tags": ["store"],
+        }
+    )
+    rewriter = RecordingQueryRewriter()
+    graph = build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=FakeJudge(),
+        memory_store=store,
+        query_rewriter=rewriter,
+    )
+
+    result = graph.invoke(
+        {
+            "mode": "advanced",
+            "user_query": "graph reconstruction",
+            "memory_context": "",
+            "memory_context_is_snapshot": True,
+            "rewritten_queries": [],
+            "raw_results": [],
+            "normalized_papers": [],
+            "deduped_papers": [],
+            "judge_results": [],
+            "ranked_candidates": [],
+        }
+    )
+
+    assert result["memory_context"] == ""
+    assert rewriter.memory_contexts == [""]
+
+
 def test_paper_discovery_graph_keeps_other_candidates_when_one_judge_fails(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
@@ -200,9 +306,71 @@ def test_paper_discovery_graph_keeps_other_candidates_when_one_judge_fails(tmp_p
     assert broken_candidate["judgement"].llm_relevance_score == 0.0
     assert broken_candidate["judgement"].quality_score == 0.0
     assert broken_candidate["judgement"].novelty_score == 0.85
+    assert result["judge_failures"] == [
+        "paper-broken: RuntimeError: synthetic judge failure for paper-broken"
+    ]
     assert broken_candidate["judgement"].final_score == ScoreUtils.calculate_final_score(
         llm_relevance_score=0.0,
         embedding_relevance_score=0.0,
         quality_score=0.0,
         novelty_score=0.85,
     )
+
+
+def test_paper_discovery_graph_classifies_query_rewrite_failure(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    graph = build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=FakeJudge(),
+        memory_store=store,
+        query_rewriter=FailingQueryRewriter(),
+    )
+
+    with pytest.raises(DiscoveryStageError) as exc_info:
+        graph.invoke(
+            {
+                "mode": "basic",
+                "user_query": "graph reconstruction",
+                "memory_context": "",
+                "rewritten_queries": [],
+                "raw_results": [],
+                "normalized_papers": [],
+                "deduped_papers": [],
+                "judge_results": [],
+                "ranked_candidates": [],
+            }
+        )
+
+    assert exc_info.value.stage == "query_rewrite"
+    assert exc_info.value.detail == "query rewrite provider unavailable"
+    assert exc_info.value.recoverable is True
+
+
+def test_paper_discovery_graph_classifies_rank_failure(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    graph = build_paper_discovery_graph(
+        search_service=FakeSearchService(),
+        judge=RankFailingJudge(),
+        memory_store=store,
+    )
+
+    with pytest.raises(DiscoveryStageError) as exc_info:
+        graph.invoke(
+            {
+                "mode": "basic",
+                "user_query": "graph reconstruction",
+                "memory_context": "",
+                "rewritten_queries": [],
+                "raw_results": [],
+                "normalized_papers": [],
+                "deduped_papers": [],
+                "judge_results": [],
+                "ranked_candidates": [],
+            }
+        )
+
+    assert exc_info.value.stage == "rank"
+    assert exc_info.value.detail == "ranking failed"
+    assert exc_info.value.recoverable is False

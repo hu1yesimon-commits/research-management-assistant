@@ -25,7 +25,7 @@ const assistantResponse = {
       next_small_experiment: "Run one baseline comparison.",
     },
   ],
-  errors: [{ section: "memory", message: "memory unavailable" }],
+  errors: [{ stage: "multi_search", message: "discovery unavailable" }],
 };
 
 function mountPanel(options = {}) {

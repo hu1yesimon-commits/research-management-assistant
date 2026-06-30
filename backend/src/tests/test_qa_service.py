@@ -3,7 +3,7 @@ from services.embedding_service import FakeEmbeddingService
 from services.memory_store import MemoryStore
 from services.qa_service import KnowledgeQAService, QAServiceError
 from services.retrieval_service import KnowledgeRetrievalService
-from services.schemas import JudgeResult, PaperId, PaperMetadata
+from services.schemas import JudgeResult, KnowledgeSearchResult, PaperId, PaperMetadata
 from services.vector_store import FakeVectorStoreService, build_chunk_uid
 
 
@@ -70,6 +70,20 @@ class TrackingAnswerGenerator:
         return self.answer
 
 
+class FailingAnswerGenerator:
+    def generate(self, question: str, retrieved_chunks: list) -> str:
+        raise RuntimeError("provider leaked secret-token")
+
+
+class RetrievalMustNotRun:
+    def __init__(self):
+        self.calls: list[tuple[str, int]] = []
+
+    def search(self, query: str, top_k: int = 5):
+        self.calls.append((query, top_k))
+        raise AssertionError("retrieval should not run when cached results are supplied")
+
+
 def test_qa_service_returns_answer_and_sources_from_retrieval_results(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
@@ -124,3 +138,59 @@ def test_qa_service_rejects_blank_question(tmp_path):
         assert exc.status_code == 400
     else:
         raise AssertionError("expected QAServiceError")
+
+
+def test_qa_service_wraps_unexpected_answer_generator_failure(tmp_path):
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    vector_store = FakeVectorStoreService()
+    seed_embedded_chunk(store, vector_store, "paper-1", "Paper One", "graph reconstruction uses priors")
+    retrieval_service = KnowledgeRetrievalService(
+        store=store,
+        embedding_service=FakeEmbeddingService(),
+        vector_store_service=vector_store,
+    )
+    service = KnowledgeQAService(
+        retrieval_service=retrieval_service,
+        answer_generator=FailingAnswerGenerator(),
+        mode="llm",
+    )
+
+    try:
+        service.answer("How do I do graph reconstruction?", top_k=5)
+    except QAServiceError as exc:
+        assert exc.status_code == 502
+        assert exc.detail == "knowledge answer generation failed"
+        assert "secret-token" not in exc.detail
+    else:
+        raise AssertionError("expected QAServiceError")
+
+
+def test_qa_service_uses_supplied_retrieval_results_without_searching():
+    retrieval_service = RetrievalMustNotRun()
+    generator = TrackingAnswerGenerator()
+    retrieved_results = [
+        KnowledgeSearchResult(
+            paper_id="paper-1",
+            title="Paper One",
+            chunk_index=0,
+            distance=0.1,
+            text="graph reconstruction uses priors",
+            vector_ref="fake:paper-1:0",
+        )
+    ]
+    service = KnowledgeQAService(
+        retrieval_service=retrieval_service,
+        answer_generator=generator,
+    )
+
+    response = service.answer(
+        "How do I do graph reconstruction?",
+        top_k=5,
+        retrieved_results=retrieved_results,
+    )
+
+    assert response.answer == "tracked answer"
+    assert response.sources[0].paper_id == "paper-1"
+    assert retrieval_service.calls == []
+    assert generator.calls == [("How do I do graph reconstruction?", retrieved_results)]

@@ -1281,6 +1281,11 @@ Audit result:
 - Atomic services remain in: `backend/src/services/`
 ```
 
+Audit result:
+- Full discovery pipeline service found: no
+- Discovery workflow owner remains: `build_paper_discovery_graph(...)`
+- Atomic services remain in: `backend/src/services/`
+
 - [ ] **Step 3: Commit audit note**
 
 ```bash

@@ -26,6 +26,7 @@
     <AssistantWorkflowPanel
       :run-assistant="handleAssistant"
       @success="handleAssistantSuccess"
+      @failure="handleAssistantFailure"
     />
     <AssistantSummaryPanel :summary="assistantSummary" />
 
@@ -257,6 +258,11 @@ async function loadMemorySummary() {
   } finally {
     memorySummaryLoading.value = false;
   }
+}
+
+function handleAssistantFailure() {
+  assistantResponse.value = null;
+  activeResultSource.value = "query";
 }
 
 async function loadCandidates() {

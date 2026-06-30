@@ -16,10 +16,16 @@ describe("AssistantSummaryPanel", () => {
           next_action: {
             type: "upload_pdf",
             message: "Review the recommended papers.",
-            options: ["accept", "upload_pdf"],
+            options: [
+              {
+                id: "continue_search",
+                label: "Search papers",
+                request_patch: { intent: "search" },
+              },
+            ],
           },
           suggested_user_actions: ["Review top papers", "Upload selected PDFs"],
-          errors: [{ section: "memory", message: "memory unavailable" }],
+          errors: [{ stage: "multi_search", message: "discovery unavailable" }],
         },
       },
     });
@@ -32,7 +38,9 @@ describe("AssistantSummaryPanel", () => {
     expect(text).toContain("Review the recommended papers.");
     expect(text).toContain("Review top papers");
     expect(text).toContain("Upload selected PDFs");
-    expect(text).toContain("memory: memory unavailable");
+    expect(text).toContain("option: Search papers");
+    expect(text).toContain("multi_search: discovery unavailable");
+    expect(text).not.toContain("[object Object]");
   });
 
   test("stays hidden when no summary is available", () => {

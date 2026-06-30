@@ -30,7 +30,9 @@
       </div>
       <p class="text-block">{{ summary.next_action.message }}</p>
       <div v-if="summary.next_action.options?.length" class="kv-grid">
-        <span v-for="option in summary.next_action.options" :key="option">option: {{ option }}</span>
+        <span v-for="option in summary.next_action.options" :key="option.id || option">
+          option: {{ option.label || option }}
+        </span>
       </div>
     </div>
 
@@ -53,7 +55,7 @@
       </div>
       <ul class="stack-list">
         <li v-for="(workflowError, index) in summary.errors" :key="index" class="source-card">
-          <strong>{{ workflowError.section || "workflow" }}:</strong> {{ workflowError.message }}
+          <strong>{{ workflowError.stage || workflowError.section || "workflow" }}:</strong> {{ workflowError.message }}
         </li>
       </ul>
     </div>
