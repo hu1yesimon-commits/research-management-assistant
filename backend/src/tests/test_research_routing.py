@@ -11,6 +11,8 @@ from agent_team.research_routing import ResearchRoutingParser, ResearchRoutingSi
         "I do not need papers",
         "Do not search papers",
         "Find no papers",
+        "Never search for papers",
+        "Not search for papers",
     ],
 )
 def test_explicit_research_negation_is_denied(message):
@@ -45,6 +47,8 @@ def test_explicit_research_requests_are_allowed(message):
         "Find papers but do not search literature",
         "Search for studies and find no papers",
         "Do not review articles, yet recommend relevant evidence",
+        "Find papers and never search literature",
+        "Find papers and not search literature",
     ],
 )
 def test_mixed_allow_and_deny_requests_are_conflicts(message):
@@ -103,6 +107,21 @@ def test_ambiguous_academic_requests_require_clarification(message):
     assert signal.decision == "conflict"
     assert signal.needs_clarify is True
     assert signal.confidence <= 0.5
+
+
+def test_ambiguous_clause_caps_conflict_confidence():
+    signal = ResearchRoutingParser().parse("Find papers; help me with literature")
+
+    assert signal.decision == "conflict"
+    assert signal.needs_clarify is True
+    assert signal.confidence <= 0.5
+
+
+def test_household_paper_compound_does_not_hide_later_academic_target():
+    signal = ResearchRoutingParser().parse("Find paper towels and studies")
+
+    assert signal.decision == "allow"
+    assert signal.needs_clarify is False
 
 
 def test_signal_contract_is_bounded_to_routing_fields():

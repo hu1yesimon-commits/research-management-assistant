@@ -32,11 +32,7 @@ class ResearchRoutingParser:
         r"[.?!;]+|\b(?:but|however|yet)\b",
         flags=re.IGNORECASE,
     )
-    _AND_REQUEST_RE = re.compile(
-        r"\band\b(?=\s+(?:(?:i\s+)?do\s+not\s+)?"
-        r"(?:find|search|discover|recommend|show|need|review|look\s+for)\b)",
-        flags=re.IGNORECASE,
-    )
+    _NEGATION_PREFIXES = (("do", "not"), ("never",), ("not",))
 
     def parse(self, message: str) -> ResearchRoutingSignal:
         normalized = self._normalize(message)
@@ -56,24 +52,29 @@ class ResearchRoutingParser:
     def _split_clauses(self, message: str) -> list[str]:
         clauses: list[str] = []
         for part in self._BOUNDARY_RE.split(message):
-            clauses.extend(self._AND_REQUEST_RE.split(part))
+            pieces = re.split(r"\band\b", part, flags=re.IGNORECASE)
+            current = pieces[0]
+            for piece in pieces[1:]:
+                if self._starts_retrieval_request(piece):
+                    clauses.append(current)
+                    current = piece
+                else:
+                    current = f"{current} and {piece}"
+            clauses.append(current)
         return [clause.strip(" ,") for clause in clauses if clause.strip(" ,")]
 
     def _classify_clause(
         self, clause: str
     ) -> Literal["allow", "deny", "ambiguous", "none"]:
         tokens = re.findall(r"[a-z]+", clause)
-        if self._is_household_paper_request(tokens):
-            return "none"
 
         outcomes: set[str] = set()
         for start, verb_end in self._request_spans(tokens):
             target_index = self._target_index(tokens, verb_end)
             if target_index is None:
                 continue
-            prefix = tokens[max(0, start - 3) : start]
             between = tokens[verb_end:target_index]
-            is_negated = prefix[-2:] == ["do", "not"] or "no" in between
+            is_negated = self._has_negation_prefix(tokens, start) or "no" in between
             outcomes.add("deny" if is_negated else "allow")
 
         if outcomes == {"allow"}:
@@ -97,8 +98,32 @@ class ResearchRoutingParser:
         upper_bound = min(len(tokens), verb_end + 8)
         for index in range(verb_end, upper_bound):
             if tokens[index] in self._TARGETS:
+                if (
+                    tokens[index] == "paper"
+                    and index + 1 < len(tokens)
+                    and tokens[index + 1] in self._HOUSEHOLD_PAPER_PRODUCTS
+                ):
+                    continue
                 return index
         return None
+
+    def _starts_retrieval_request(self, clause: str) -> bool:
+        tokens = re.findall(r"[a-z]+", clause)
+        start = 0
+        if tokens[:1] == ["i"]:
+            start = 1
+        for prefix in self._NEGATION_PREFIXES:
+            if tuple(tokens[start : start + len(prefix)]) == prefix:
+                start += len(prefix)
+                break
+        return any(request_start == start for request_start, _ in self._request_spans(tokens))
+
+    def _has_negation_prefix(self, tokens: list[str], request_start: int) -> bool:
+        prefix_tokens = tokens[:request_start]
+        return any(
+            tuple(prefix_tokens[-len(prefix) :]) == prefix
+            for prefix in self._NEGATION_PREFIXES
+        )
 
     def _has_ambiguous_request(self, tokens: list[str]) -> bool:
         for index, token in enumerate(tokens):
@@ -108,16 +133,10 @@ class ResearchRoutingParser:
                 return True
         return False
 
-    def _is_household_paper_request(self, tokens: list[str]) -> bool:
-        return any(
-            first == "paper" and second in self._HOUSEHOLD_PAPER_PRODUCTS
-            for first, second in zip(tokens, tokens[1:])
-        )
-
     def _aggregate(self, outcomes: list[str]) -> ResearchRoutingSignal:
         distinct = set(outcomes)
         if "ambiguous" in distinct or {"allow", "deny"} <= distinct:
-            confidence = 0.5 if distinct == {"ambiguous"} else 1.0
+            confidence = 0.5 if "ambiguous" in distinct else 1.0
             return ResearchRoutingSignal(
                 decision="conflict",
                 needs_clarify=True,
