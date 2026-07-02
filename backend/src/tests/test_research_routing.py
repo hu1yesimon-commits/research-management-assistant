@@ -145,6 +145,10 @@ def test_singular_household_paper_compounds_are_not_academic_requests(prefix, pr
         "Review our memory",
         "Review experiment logs",
         "Review research notes",
+        "Review current experiment logs",
+        "Review the current experiment logs",
+        "Review saved experiment logs",
+        "Review existing experiment logs",
     ],
 )
 def test_review_existing_research_is_not_a_fresh_research_request(message):

@@ -209,15 +209,7 @@ class ResearchRoutingParser:
         if tokens[index : index + 1] == ["the"]:
             index += 1
 
-        special_index = index
-        if tokens[special_index : special_index + 1] in (["my"], ["our"]):
-            special_index += 1
-        if tokens[special_index : special_index + 1] == ["notes"]:
-            return True
-        if tokens[special_index : special_index + 2] in (
-            ["experiment", "logs"],
-            ["research", "notes"],
-        ):
+        if self._matches_existing_material_phrase(tokens, index):
             return True
 
         modifier_count = 0
@@ -229,9 +221,18 @@ class ResearchRoutingParser:
             index += 1
         if modifier_count == 0 or index >= len(tokens):
             return False
+        if self._matches_existing_material_phrase(tokens, index):
+            return True
         if tokens[index] not in self._EXISTING_REVIEW_TARGETS:
             return False
         return tokens[index] != "paper" or self._is_valid_academic_target(tokens, index)
+
+    def _matches_existing_material_phrase(
+        self, tokens: list[str], start: int
+    ) -> bool:
+        return tokens[start : start + 1] == ["notes"] or tokens[
+            start : start + 2
+        ] in (["experiment", "logs"], ["research", "notes"])
 
     def _matches_direct_fresh_review(
         self, tokens: list[str], object_start: int
