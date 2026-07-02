@@ -79,13 +79,14 @@ def test_parallel_deny_requests_remain_denied():
 @pytest.mark.parametrize(
     "message",
     [
-        "Explain this function",
+        "Explain the ranking approach",
         "Rewrite this paragraph",
-        "Read this code",
+        "Summarize yesterday's meeting",
         "I need paper towels",
         "Find paper plates",
         "Help me with paper towels",
         "I want paper cups",
+        "Review saved paper towels",
     ],
 )
 def test_non_research_messages_have_no_routing_signal(message):
@@ -138,43 +139,74 @@ def test_singular_household_paper_compounds_are_not_academic_requests(prefix, pr
 @pytest.mark.parametrize(
     "message",
     [
-        "Review this code and explain how papers are ranked",
-        "Review this code about papers",
+        "Review existing literature",
+        "Review my saved papers",
+        "Review current materials",
+        "Review our memory",
+        "Review experiment logs",
+        "Review research notes",
     ],
 )
-def test_review_does_not_capture_distant_or_unrelated_academic_words(message):
+def test_review_existing_research_is_not_a_fresh_research_request(message):
     signal = ResearchRoutingParser().parse(message)
 
-    assert signal.decision == "none"
+    assert signal.decision == "review_existing"
     assert signal.needs_clarify is False
 
 
 @pytest.mark.parametrize(
     "message",
     [
-        "Review the recent papers about graph reconstruction",
-        "Review the literature on graph reconstruction",
+        "Review papers about graph reconstruction",
+        "Review three very relevant papers",
+        "Review peer reviewed papers",
     ],
 )
-def test_review_accepts_direct_collection_targets(message):
+def test_bare_review_requests_require_clarification(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "conflict"
+    assert signal.needs_clarify is True
+    assert signal.confidence <= 0.5
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Review recent papers",
+        "Review latest literature",
+        "Review new studies",
+    ],
+)
+def test_review_with_freshness_language_is_allowed(message):
     signal = ResearchRoutingParser().parse(message)
 
     assert signal.decision == "allow"
     assert signal.needs_clarify is False
 
 
-@pytest.mark.parametrize(
-    ("message", "decision"),
-    [
-        ("Review three highly relevant papers about graph reconstruction", "allow"),
-        ("Do not review three highly relevant papers", "deny"),
-        ("Review the single relevant paper", "allow"),
-    ],
-)
-def test_review_parses_bounded_modified_direct_targets(message, decision):
-    signal = ResearchRoutingParser().parse(message)
+def test_existing_review_combined_with_fresh_retrieval_is_allowed():
+    signal = ResearchRoutingParser().parse(
+        "Review existing papers and find new papers"
+    )
 
-    assert signal.decision == decision
+    assert signal.decision == "allow"
+    assert signal.needs_clarify is False
+
+
+def test_negated_review_is_denied():
+    signal = ResearchRoutingParser().parse("Do not review literature")
+
+    assert signal.decision == "deny"
+    assert signal.needs_clarify is False
+
+
+def test_existing_review_takes_precedence_over_fresh_retrieval_denial():
+    signal = ResearchRoutingParser().parse(
+        "Review saved papers; do not find new papers"
+    )
+
+    assert signal.decision == "review_existing"
     assert signal.needs_clarify is False
 
 
