@@ -235,6 +235,42 @@ def test_negated_standalone_fresh_research_phrases_are_denied(message):
     assert signal.needs_clarify is False
 
 
+@pytest.mark.parametrize(
+    "message",
+    ["Recent notes about papers", "New experiment logs about papers"],
+)
+def test_fresh_markers_do_not_cross_unrelated_material_nouns(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "none"
+    assert signal.needs_clarify is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Review a paper about our method",
+        "Review papers comparing our method",
+        "Review papers and write notes",
+    ],
+)
+def test_direct_bare_review_remains_ambiguous(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "conflict"
+    assert signal.needs_clarify is True
+    assert signal.confidence <= 0.5
+
+
+def test_existing_review_is_bound_to_its_direct_object():
+    signal = ResearchRoutingParser().parse(
+        "Review existing papers with recent notes"
+    )
+
+    assert signal.decision == "review_existing"
+    assert signal.needs_clarify is False
+
+
 def test_negated_review_is_denied():
     signal = ResearchRoutingParser().parse("Do not review literature")
 

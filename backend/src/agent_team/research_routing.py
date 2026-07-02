@@ -38,6 +38,26 @@ class ResearchRoutingParser:
     }
     _SINGLE_VERBS = {"find", "search", "discover", "recommend", "show", "need"}
     _FRESH_REVIEW_MODIFIERS = {"new", "recent", "latest"}
+    _FRESH_TARGET_MODIFIERS = {
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "single",
+        "some",
+        "top",
+        "best",
+        "relevant",
+        "highly",
+        "very",
+        "most",
+    }
     _FRESH_REVIEW_TARGETS = {
         "paper",
         "papers",
@@ -56,6 +76,14 @@ class ResearchRoutingParser:
         "memories",
         "material",
         "materials",
+        "notes",
+    }
+    _BARE_REVIEW_MODIFIERS = _FRESH_TARGET_MODIFIERS | {
+        "a",
+        "an",
+        "the",
+        "peer",
+        "reviewed",
     }
     _BOUNDARY_RE = re.compile(
         r"[.?!;]+|\b(?:but|however|yet)\b",
@@ -158,36 +186,72 @@ class ResearchRoutingParser:
         for review_index, token in enumerate(tokens):
             if token != "review":
                 continue
-            window_end = min(len(tokens), review_index + 9)
-            window = tokens[review_index + 1 : window_end]
-            target_index = self._target_index(tokens, review_index + 1)
-            has_special_existing_target = (
-                self._contains_phrase(window, ("experiment", "logs"))
-                or self._contains_phrase(window, ("research", "notes"))
-                or "notes" in window
-            )
-            has_existing_target = has_special_existing_target or (
-                any(modifier in window for modifier in self._EXISTING_REVIEW_MODIFIERS)
-                and self._has_existing_review_target(
-                    tokens, review_index + 1, window_end
-                )
-            )
-            has_review_target = target_index is not None or has_existing_target
-            if not has_review_target:
+            object_start = review_index + 1
+            if self._matches_direct_existing_review(tokens, object_start):
+                outcome = "review_existing"
+            elif self._matches_direct_fresh_review(tokens, object_start):
+                outcome = "allow"
+            elif self._matches_direct_bare_review(tokens, object_start):
+                outcome = "review_ambiguous"
+            else:
                 continue
             if self._has_negation_prefix(tokens, review_index):
                 return "deny"
-            has_fresh_target = (
-                target_index is not None
-                and tokens[target_index] in self._FRESH_REVIEW_TARGETS
-                and any(modifier in window for modifier in self._FRESH_REVIEW_MODIFIERS)
-            )
-            if has_fresh_target or has_fresh_allow:
+            if has_fresh_allow:
                 return "allow"
-            if has_existing_target:
-                return "review_existing"
-            return "review_ambiguous"
+            return outcome
         return "none"
+
+    def _matches_direct_existing_review(
+        self, tokens: list[str], object_start: int
+    ) -> bool:
+        index = object_start
+        if tokens[index : index + 1] == ["the"]:
+            index += 1
+
+        special_index = index
+        if tokens[special_index : special_index + 1] in (["my"], ["our"]):
+            special_index += 1
+        if tokens[special_index : special_index + 1] == ["notes"]:
+            return True
+        if tokens[special_index : special_index + 2] in (
+            ["experiment", "logs"],
+            ["research", "notes"],
+        ):
+            return True
+
+        modifier_count = 0
+        while (
+            index < len(tokens)
+            and tokens[index] in self._EXISTING_REVIEW_MODIFIERS
+        ):
+            modifier_count += 1
+            index += 1
+        if modifier_count == 0 or index >= len(tokens):
+            return False
+        if tokens[index] not in self._EXISTING_REVIEW_TARGETS:
+            return False
+        return tokens[index] != "paper" or self._is_valid_academic_target(tokens, index)
+
+    def _matches_direct_fresh_review(
+        self, tokens: list[str], object_start: int
+    ) -> bool:
+        marker_index = object_start
+        if tokens[marker_index : marker_index + 1] == ["the"]:
+            marker_index += 1
+        return self._fresh_target_index(tokens, marker_index) is not None
+
+    def _matches_direct_bare_review(
+        self, tokens: list[str], object_start: int
+    ) -> bool:
+        upper_bound = min(len(tokens), object_start + 8)
+        for index in range(object_start, upper_bound):
+            if self._is_valid_academic_target(tokens, index):
+                return True
+            if tokens[index].isdigit() or tokens[index] in self._BARE_REVIEW_MODIFIERS:
+                continue
+            return False
+        return False
 
     def _classify_standalone_fresh(
         self, tokens: list[str]
@@ -204,23 +268,28 @@ class ResearchRoutingParser:
             return "none"
         if tokens[marker_index] not in self._FRESH_REVIEW_MODIFIERS:
             return "none"
-        if self._target_index(tokens, marker_index + 1) is None:
+        if self._fresh_target_index(tokens, marker_index) is None:
             return "none"
         return "deny" if is_negated else "allow"
 
-    def _has_existing_review_target(
-        self, tokens: list[str], start: int, end: int
-    ) -> bool:
-        for index in range(start, end):
-            token = tokens[index]
-            if token not in self._EXISTING_REVIEW_TARGETS:
+    def _fresh_target_index(self, tokens: list[str], marker_index: int) -> int | None:
+        if tokens[marker_index : marker_index + 1] not in (
+            ["new"],
+            ["recent"],
+            ["latest"],
+        ):
+            return None
+        index = marker_index + 1
+        modifier_count = 0
+        while index < len(tokens) and modifier_count < 2:
+            if tokens[index].isdigit() or tokens[index] in self._FRESH_TARGET_MODIFIERS:
+                modifier_count += 1
+                index += 1
                 continue
-            if token != "paper" or self._is_valid_academic_target(tokens, index):
-                return True
-        return False
-
-    def _contains_phrase(self, tokens: list[str], phrase: tuple[str, str]) -> bool:
-        return any(tuple(tokens[index : index + 2]) == phrase for index in range(len(tokens)))
+            break
+        if index >= len(tokens) or tokens[index] not in self._FRESH_REVIEW_TARGETS:
+            return None
+        return index if self._is_valid_academic_target(tokens, index) else None
 
     def _combine_clause_outcomes(self, outcomes: set[str]):
         if "ambiguous" in outcomes or {"allow", "deny"} <= outcomes:
