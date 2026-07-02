@@ -280,6 +280,92 @@ def test_deterministic_planner_parses_bounded_research_intent(message, expected)
     assert PlanValidator().validate(plan) is plan
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Do not search literature; find recent papers",
+        "Review papers about graph reconstruction",
+    ],
+)
+def test_deterministic_planner_clarifies_conflicting_research_signals(message):
+    plan = DeterministicLeaderPlanner().plan(make_input(message))
+
+    assert plan.plan_type == "clarify"
+    assert plan.steps == []
+    assert PlanValidator().validate(plan) is plan
+
+
+@pytest.mark.parametrize(
+    ("has_knowledge", "expected"),
+    [(False, "clarify"), (True, "idea")],
+)
+def test_deterministic_planner_does_not_silently_research_denied_idea_requests(
+    has_knowledge, expected
+):
+    planner_input = make_input(
+        "Do not search papers; propose ideas from this experiment",
+        has_knowledge=has_knowledge,
+        experiment_log=make_log(),
+    )
+
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+
+    assert plan.plan_type == expected
+    assert PlanValidator().validate(plan, experiment_log=make_log()) is plan
+
+
+@pytest.mark.parametrize(
+    ("message", "has_knowledge", "expected"),
+    [
+        ("Review my saved papers", True, "knowledge_qa"),
+        ("Review experiment logs", False, "clarify"),
+    ],
+)
+def test_deterministic_planner_routes_existing_review_only_with_coverage(
+    message, has_knowledge, expected
+):
+    plan = DeterministicLeaderPlanner().plan(
+        make_input(message, has_knowledge=has_knowledge)
+    )
+
+    assert plan.plan_type == expected
+    assert PlanValidator().validate(plan) is plan
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Review recent papers",
+        "Recent papers",
+        "Review existing papers and find new papers",
+    ],
+)
+def test_deterministic_planner_routes_fresh_research_signals(message):
+    plan = DeterministicLeaderPlanner().plan(make_input(message))
+
+    assert plan.plan_type == "research"
+    assert PlanValidator().validate(plan) is plan
+
+
+@pytest.mark.parametrize(
+    ("has_knowledge", "expected"),
+    [(True, "idea"), (False, "clarify")],
+)
+def test_deterministic_planner_keeps_existing_review_idea_routing_with_leader(
+    has_knowledge, expected
+):
+    planner_input = make_input(
+        "Review my saved papers and propose ideas from this experiment",
+        has_knowledge=has_knowledge,
+        experiment_log=make_log(),
+    )
+
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+
+    assert plan.plan_type == expected
+    assert PlanValidator().validate(plan, experiment_log=make_log()) is plan
+
+
 def test_prompt_builder_renders_each_few_shot_as_a_full_validated_plan():
     messages = LeaderPromptBuilder().messages(make_input("Find papers"))
     examples = messages[1:-1]
