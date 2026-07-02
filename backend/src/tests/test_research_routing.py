@@ -163,6 +163,21 @@ def test_review_accepts_direct_collection_targets(message):
     assert signal.needs_clarify is False
 
 
+@pytest.mark.parametrize(
+    ("message", "decision"),
+    [
+        ("Review three highly relevant papers about graph reconstruction", "allow"),
+        ("Do not review three highly relevant papers", "deny"),
+        ("Review the single relevant paper", "allow"),
+    ],
+)
+def test_review_parses_bounded_modified_direct_targets(message, decision):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == decision
+    assert signal.needs_clarify is False
+
+
 def test_signal_contract_is_bounded_to_routing_fields():
     signal = ResearchRoutingSignal(decision="allow", confidence=1.0)
 

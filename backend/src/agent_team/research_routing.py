@@ -36,13 +36,32 @@ class ResearchRoutingParser:
         "cup",
         "cups",
     }
-    _REVIEW_TARGETS = {
-        "papers",
-        "literature",
-        "studies",
-        "articles",
-        "evidence",
-        "methods",
+    _REVIEW_MODIFIERS = {
+        "the",
+        "a",
+        "an",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "single",
+        "some",
+        "top",
+        "best",
+        "new",
+        "newer",
+        "recent",
+        "latest",
+        "relevant",
+        "highly",
+        "most",
+        "no",
     }
     _SINGLE_VERBS = {"find", "search", "discover", "recommend", "show", "need", "review"}
     _BOUNDARY_RE = re.compile(
@@ -83,7 +102,7 @@ class ResearchRoutingParser:
     def _classify_clause(
         self, clause: str
     ) -> Literal["allow", "deny", "ambiguous", "none"]:
-        tokens = re.findall(r"[a-z]+", clause)
+        tokens = re.findall(r"[a-z]+|\d+", clause)
 
         outcomes: set[str] = set()
         for start, verb_end in self._request_spans(tokens):
@@ -122,24 +141,39 @@ class ResearchRoutingParser:
         *,
         request_verb: str | None = None,
     ) -> int | None:
-        window = 3 if request_verb == "review" else 8
-        valid_targets = (
-            self._REVIEW_TARGETS if request_verb == "review" else self._TARGETS
-        )
-        upper_bound = min(len(tokens), search_start + window)
+        if request_verb == "review":
+            return self._direct_review_target_index(tokens, search_start)
+
+        upper_bound = min(len(tokens), search_start + 8)
         for index in range(search_start, upper_bound):
-            if tokens[index] in valid_targets:
-                if (
-                    tokens[index] == "paper"
-                    and index + 1 < len(tokens)
-                    and tokens[index + 1] in self._HOUSEHOLD_PAPER_PRODUCTS
-                ):
-                    continue
+            if self._is_valid_academic_target(tokens, index):
                 return index
         return None
 
+    def _direct_review_target_index(
+        self, tokens: list[str], search_start: int
+    ) -> int | None:
+        upper_bound = min(len(tokens), search_start + 8)
+        for index in range(search_start, upper_bound):
+            token = tokens[index]
+            if self._is_valid_academic_target(tokens, index):
+                return index
+            if token.isdigit() or token in self._REVIEW_MODIFIERS:
+                continue
+            return None
+        return None
+
+    def _is_valid_academic_target(self, tokens: list[str], index: int) -> bool:
+        if tokens[index] not in self._TARGETS:
+            return False
+        return not (
+            tokens[index] == "paper"
+            and index + 1 < len(tokens)
+            and tokens[index + 1] in self._HOUSEHOLD_PAPER_PRODUCTS
+        )
+
     def _starts_retrieval_request(self, clause: str) -> bool:
-        tokens = re.findall(r"[a-z]+", clause)
+        tokens = re.findall(r"[a-z]+|\d+", clause)
         start = 0
         if tokens[:1] == ["i"]:
             start = 1
