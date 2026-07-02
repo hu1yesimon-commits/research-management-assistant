@@ -315,6 +315,28 @@ def test_deterministic_planner_does_not_silently_research_denied_idea_requests(
 
 
 @pytest.mark.parametrize(
+    ("message", "has_knowledge"),
+    [
+        ("Find recent papers and propose ideas from this experiment", True),
+        ("Propose the next test for this experiment", False),
+    ],
+)
+def test_deterministic_planner_preserves_required_research_before_ideas(
+    message, has_knowledge
+):
+    planner_input = make_input(
+        message,
+        has_knowledge=has_knowledge,
+        experiment_log=make_log(),
+    )
+
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+
+    assert plan.plan_type == "research_then_idea"
+    assert PlanValidator().validate(plan, experiment_log=make_log()) is plan
+
+
+@pytest.mark.parametrize(
     ("message", "has_knowledge", "expected"),
     [
         ("Review my saved papers", True, "knowledge_qa"),

@@ -155,15 +155,17 @@ class DeterministicLeaderPlanner:
                     message,
                     "Please provide the experiment log before asking for ideas.",
                 )
-            if planner_input.has_knowledge:
-                return _bounded_plan("idea", message)
             if research_signal.decision == "allow":
                 return _bounded_plan("research_then_idea", message)
-            return _bounded_plan(
-                "clarify",
-                message,
-                "Should the team search for fresh papers before generating ideas?",
-            )
+            if planner_input.has_knowledge:
+                return _bounded_plan("idea", message)
+            if research_signal.decision in {"deny", "review_existing"}:
+                return _bounded_plan(
+                    "clarify",
+                    message,
+                    "Should the team search for fresh papers before generating ideas?",
+                )
+            return _bounded_plan("research_then_idea", message)
 
         if research_signal.decision == "allow":
             return _bounded_plan("research", message)
