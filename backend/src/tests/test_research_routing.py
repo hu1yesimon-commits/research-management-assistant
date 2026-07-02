@@ -154,6 +154,14 @@ def test_review_existing_research_is_not_a_fresh_research_request(message):
     assert signal.needs_clarify is False
 
 
+@pytest.mark.parametrize("message", ["Review notes", "Review my notes"])
+def test_review_notes_is_existing_research_review(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "review_existing"
+    assert signal.needs_clarify is False
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -191,6 +199,39 @@ def test_existing_review_combined_with_fresh_retrieval_is_allowed():
     )
 
     assert signal.decision == "allow"
+    assert signal.needs_clarify is False
+
+
+def test_ambiguous_review_combined_with_explicit_retrieval_is_allowed():
+    signal = ResearchRoutingParser().parse("Review papers and find new papers")
+
+    assert signal.decision == "allow"
+    assert signal.needs_clarify is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Recent papers about graph reconstruction",
+        "Latest literature on graph reconstruction",
+        "New papers about graph reconstruction",
+    ],
+)
+def test_standalone_fresh_research_phrases_are_allowed(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "allow"
+    assert signal.needs_clarify is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["No recent papers", "Not latest literature", "Never new papers"],
+)
+def test_negated_standalone_fresh_research_phrases_are_denied(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "deny"
     assert signal.needs_clarify is False
 
 

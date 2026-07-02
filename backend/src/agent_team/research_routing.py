@@ -94,10 +94,20 @@ class ResearchRoutingParser:
 
     def _classify_clause(
         self, clause: str
-    ) -> Literal["allow", "deny", "ambiguous", "review_existing", "none"]:
+    ) -> Literal[
+        "allow",
+        "deny",
+        "ambiguous",
+        "review_ambiguous",
+        "review_existing",
+        "none",
+    ]:
         tokens = re.findall(r"[a-z]+|\d+", clause)
 
         outcomes: set[str] = set()
+        standalone_outcome = self._classify_standalone_fresh(tokens)
+        if standalone_outcome != "none":
+            outcomes.add(standalone_outcome)
         for start, verb_end in self._request_spans(tokens):
             target_index = self._target_index(tokens, verb_end)
             if target_index is None:
@@ -142,7 +152,9 @@ class ResearchRoutingParser:
 
     def _classify_review(
         self, tokens: list[str], *, has_fresh_allow: bool
-    ) -> Literal["allow", "deny", "ambiguous", "review_existing", "none"]:
+    ) -> Literal[
+        "allow", "deny", "review_ambiguous", "review_existing", "none"
+    ]:
         for review_index, token in enumerate(tokens):
             if token != "review":
                 continue
@@ -152,6 +164,7 @@ class ResearchRoutingParser:
             has_special_existing_target = (
                 self._contains_phrase(window, ("experiment", "logs"))
                 or self._contains_phrase(window, ("research", "notes"))
+                or "notes" in window
             )
             has_existing_target = has_special_existing_target or (
                 any(modifier in window for modifier in self._EXISTING_REVIEW_MODIFIERS)
@@ -173,8 +186,27 @@ class ResearchRoutingParser:
                 return "allow"
             if has_existing_target:
                 return "review_existing"
-            return "ambiguous"
+            return "review_ambiguous"
         return "none"
+
+    def _classify_standalone_fresh(
+        self, tokens: list[str]
+    ) -> Literal["allow", "deny", "none"]:
+        marker_index = 0
+        is_negated = False
+        if tokens[:2] == ["do", "not"]:
+            marker_index = 2
+            is_negated = True
+        elif tokens[:1] and tokens[0] in {"no", "not", "never"}:
+            marker_index = 1
+            is_negated = True
+        if marker_index >= len(tokens):
+            return "none"
+        if tokens[marker_index] not in self._FRESH_REVIEW_MODIFIERS:
+            return "none"
+        if self._target_index(tokens, marker_index + 1) is None:
+            return "none"
+        return "deny" if is_negated else "allow"
 
     def _has_existing_review_target(
         self, tokens: list[str], start: int, end: int
@@ -195,6 +227,8 @@ class ResearchRoutingParser:
             return "ambiguous"
         if "allow" in outcomes:
             return "allow"
+        if "review_ambiguous" in outcomes:
+            return "review_ambiguous"
         if "review_existing" in outcomes:
             return "review_existing"
         if "deny" in outcomes:
@@ -203,6 +237,8 @@ class ResearchRoutingParser:
 
     def _starts_retrieval_request(self, clause: str) -> bool:
         tokens = re.findall(r"[a-z]+|\d+", clause)
+        if self._classify_standalone_fresh(tokens) != "none":
+            return True
         start = 0
         if tokens[:1] == ["i"]:
             start = 1
@@ -238,10 +274,14 @@ class ResearchRoutingParser:
                 needs_clarify=True,
                 confidence=confidence,
             )
-        if distinct == {"allow"}:
-            return ResearchRoutingSignal(decision="allow", confidence=1.0)
         if "allow" in distinct:
             return ResearchRoutingSignal(decision="allow", confidence=1.0)
+        if "review_ambiguous" in distinct:
+            return ResearchRoutingSignal(
+                decision="conflict",
+                needs_clarify=True,
+                confidence=0.5,
+            )
         if "review_existing" in distinct:
             return ResearchRoutingSignal(decision="review_existing", confidence=1.0)
         if distinct == {"deny"}:
