@@ -84,6 +84,8 @@ def test_parallel_deny_requests_remain_denied():
         "Read this code",
         "I need paper towels",
         "Find paper plates",
+        "Help me with paper towels",
+        "I want paper cups",
     ],
 )
 def test_non_research_messages_have_no_routing_signal(message):

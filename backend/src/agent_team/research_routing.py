@@ -129,7 +129,7 @@ class ResearchRoutingParser:
         for index, token in enumerate(tokens):
             if token not in {"help", "want"}:
                 continue
-            if any(target in self._TARGETS for target in tokens[index + 1 : index + 9]):
+            if self._target_index(tokens, index + 1) is not None:
                 return True
         return False
 
