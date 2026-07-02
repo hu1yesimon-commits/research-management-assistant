@@ -132,9 +132,6 @@ class DeterministicLeaderPlanner:
         message = planner_input.message.strip()
         normalized = message.lower()
 
-        if self._is_product_capability_question(normalized):
-            return _bounded_plan("direct_reply", message)
-
         research_signal = ResearchRoutingParser().parse(message)
         asks_for_ideas = self._contains_term(
             normalized,
@@ -178,6 +175,9 @@ class DeterministicLeaderPlanner:
                 message,
                 "Which saved research material should the team review?",
             )
+
+        if self._is_product_capability_question(normalized):
+            return _bounded_plan("direct_reply", message)
 
         if self._asks_for_agent_creation(normalized):
             return _bounded_plan(

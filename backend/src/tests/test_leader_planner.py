@@ -121,6 +121,29 @@ def test_deterministic_planner_handles_guardrail_routes(
     assert all(step.action != "accept" for step in plan.steps)
 
 
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("What can you do?", "direct_reply"),
+        ("What can you do? Find recent papers", "research"),
+        (
+            "What can you do? Do not search literature; find recent papers",
+            "clarify",
+        ),
+        ("What can you do? Do not search papers", "direct_reply"),
+    ],
+)
+def test_deterministic_planner_prioritizes_research_guard_over_product_reply(
+    message, expected
+):
+    plan = DeterministicLeaderPlanner().plan(make_input(message))
+
+    assert plan.plan_type == expected
+    if expected in {"direct_reply", "clarify"}:
+        assert plan.steps == []
+    assert PlanValidator().validate(plan) is plan
+
+
 def test_deterministic_planner_emits_exact_bounded_steps_and_dependencies():
     planner = DeterministicLeaderPlanner()
     cases = [
