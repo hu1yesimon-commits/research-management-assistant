@@ -244,6 +244,23 @@ def test_deterministic_planner_prioritizes_explicit_research_without_substring_c
     assert plan.plan_type == "research"
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Recommend papers about graph reconstruction",
+        "Show me papers about graph reconstruction",
+        "I need literature on graph reconstruction",
+    ],
+)
+def test_deterministic_planner_recognizes_explicit_paper_requests(message):
+    planner_input = make_input(message)
+
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+
+    assert plan.plan_type == "research"
+    assert PlanValidator().validate(plan) is plan
+
+
 def test_prompt_builder_renders_each_few_shot_as_a_full_validated_plan():
     messages = LeaderPromptBuilder().messages(make_input("Find papers"))
     examples = messages[1:-1]

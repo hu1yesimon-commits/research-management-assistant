@@ -134,7 +134,9 @@ class DeterministicLeaderPlanner:
         if self._is_product_capability_question(normalized):
             return _bounded_plan("direct_reply", message)
 
-        asks_for_research = self._contains_term(
+        asks_for_research = self._asks_for_paper_request(
+            normalized
+        ) or self._contains_term(
             normalized,
             (
                 "find",
@@ -224,6 +226,16 @@ class DeterministicLeaderPlanner:
     def _asks_for_agent_creation(message: str) -> bool:
         return bool(
             re.search(r"\b(?:create|add|spawn)\b.{0,40}\bagent\b", message)
+        )
+
+    @staticmethod
+    def _asks_for_paper_request(message: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(?:recommend(?:\s+me)?|show\s+me|give\s+me|need|request)"
+                r"\s+(?:some\s+)?(?:papers?|literature)\b",
+                message,
+            )
         )
 
 
