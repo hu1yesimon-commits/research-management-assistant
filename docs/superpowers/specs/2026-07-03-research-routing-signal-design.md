@@ -50,7 +50,7 @@ The signal remains private to the deterministic planner. No API, persistence, or
 3. Evaluate negation only inside its clause. A negation in one clause must not leak into another clause.
 4. Recognize fresh retrieval only when a bounded request expression is associated with an academic retrieval target.
 5. Recognize `review existing literature`, `review my papers`, `review experiment logs`, `review notes`, and equivalent saved/current research-material expressions as `review_existing`.
-6. Treat bare `review` plus an academic target as ambiguous unless the same clause contains an explicit fresh-retrieval expression such as `find`, `search`, `discover`, `recommend`, `show`, `look for`, `latest`, `recent`, or `new papers`.
+6. Treat bare `review` plus an academic target as ambiguous unless the same clause contains an explicit fresh-retrieval expression. Verbs such as `find`, `search`, `discover`, `recommend`, `show`, and `look for` retain the bounded eight-token academic-target rule. Marker phrases `latest`, `recent`, or `new` apply only to literature-collection targets (`paper(s)`, `literature`, `study/studies`, `article(s)`) and may contain at most two documented count or relevance modifiers before the target.
 7. Unrelated language remains `none`; the parser does not contain branches for code, functions, text, files, or other general-assistant domains.
 
 Clause results combine as follows:

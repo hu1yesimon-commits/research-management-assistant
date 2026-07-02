@@ -169,7 +169,8 @@ Implementation requirements:
 - normalize `don't` to `do not` before tokenization;
 - split on `.`, `?`, `!`, `;`, `but`, `however`, and `yet`;
 - split on `and` only when the right side begins a bounded retrieval request or retrieval negation;
-- classify a clause as `allow` only when an explicit fresh-retrieval verb (`find`, `search`, `discover`, `recommend`, `show`, `look for`) or fresh marker (`latest`, `recent`, `new papers`) is associated within eight tokens with `paper(s)`, `literature`, `study/studies`, `article(s)`, `evidence`, or `method(s)`;
+- classify a clause as `allow` when an explicit fresh-retrieval verb (`find`, `search`, `discover`, `recommend`, `show`, `look for`) is associated within eight tokens with `paper(s)`, `literature`, `study/studies`, `article(s)`, `evidence`, or `method(s)`;
+- separately classify `latest`, `recent`, or `new` marker phrases as `allow` only when followed by at most two modifiers from the fixed count/relevance vocabulary and then a literature-collection target: `paper(s)`, `literature`, `study/studies`, or `article(s)`; marker phrases do not apply to `evidence` or `method(s)`;
 - allow count and relevance modifiers between request and target;
 - classify the same bounded expression as `deny` when `no`, `not`, `never`, or normalized `do not` occurs in that clause's request span;
 - classify `review existing literature`, `review my papers`, `review experiment logs`, `review notes`, and saved/current research-material equivalents as `review_existing`;
