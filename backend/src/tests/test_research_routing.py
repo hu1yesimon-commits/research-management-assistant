@@ -271,6 +271,26 @@ def test_existing_review_is_bound_to_its_direct_object():
     assert signal.needs_clarify is False
 
 
+@pytest.mark.parametrize(
+    "message",
+    ["Review recent evidence", "Review latest methods", "Review new method"],
+)
+def test_review_freshness_with_non_collection_target_remains_ambiguous(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "conflict"
+    assert signal.needs_clarify is True
+    assert signal.confidence <= 0.5
+
+
+@pytest.mark.parametrize("message", ["Recent evidence", "Latest methods"])
+def test_standalone_freshness_requires_a_collection_target(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "none"
+    assert signal.needs_clarify is False
+
+
 def test_negated_review_is_denied():
     signal = ResearchRoutingParser().parse("Do not review literature")
 

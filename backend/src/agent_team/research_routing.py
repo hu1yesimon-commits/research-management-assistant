@@ -78,7 +78,7 @@ class ResearchRoutingParser:
         "materials",
         "notes",
     }
-    _BARE_REVIEW_MODIFIERS = _FRESH_TARGET_MODIFIERS | {
+    _BARE_REVIEW_MODIFIERS = _FRESH_TARGET_MODIFIERS | _FRESH_REVIEW_MODIFIERS | {
         "a",
         "an",
         "the",
