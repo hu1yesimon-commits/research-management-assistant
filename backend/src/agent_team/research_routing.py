@@ -26,7 +26,24 @@ class ResearchRoutingParser:
         "method",
         "methods",
     }
-    _HOUSEHOLD_PAPER_PRODUCTS = {"towels", "plates", "bags", "cups"}
+    _HOUSEHOLD_PAPER_PRODUCTS = {
+        "towel",
+        "towels",
+        "plate",
+        "plates",
+        "bag",
+        "bags",
+        "cup",
+        "cups",
+    }
+    _REVIEW_TARGETS = {
+        "papers",
+        "literature",
+        "studies",
+        "articles",
+        "evidence",
+        "methods",
+    }
     _SINGLE_VERBS = {"find", "search", "discover", "recommend", "show", "need", "review"}
     _BOUNDARY_RE = re.compile(
         r"[.?!;]+|\b(?:but|however|yet)\b",
@@ -70,7 +87,11 @@ class ResearchRoutingParser:
 
         outcomes: set[str] = set()
         for start, verb_end in self._request_spans(tokens):
-            target_index = self._target_index(tokens, verb_end)
+            target_index = self._target_index(
+                tokens,
+                verb_end,
+                request_verb=tokens[start],
+            )
             if target_index is None:
                 continue
             between = tokens[verb_end:target_index]
@@ -94,10 +115,20 @@ class ResearchRoutingParser:
             elif token == "look" and tokens[index : index + 2] == ["look", "for"]:
                 yield index, index + 2
 
-    def _target_index(self, tokens: list[str], verb_end: int) -> int | None:
-        upper_bound = min(len(tokens), verb_end + 8)
-        for index in range(verb_end, upper_bound):
-            if tokens[index] in self._TARGETS:
+    def _target_index(
+        self,
+        tokens: list[str],
+        search_start: int,
+        *,
+        request_verb: str | None = None,
+    ) -> int | None:
+        window = 3 if request_verb == "review" else 8
+        valid_targets = (
+            self._REVIEW_TARGETS if request_verb == "review" else self._TARGETS
+        )
+        upper_bound = min(len(tokens), search_start + window)
+        for index in range(search_start, upper_bound):
+            if tokens[index] in valid_targets:
                 if (
                     tokens[index] == "paper"
                     and index + 1 < len(tokens)

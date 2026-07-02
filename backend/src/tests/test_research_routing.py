@@ -126,6 +126,43 @@ def test_household_paper_compound_does_not_hide_later_academic_target():
     assert signal.needs_clarify is False
 
 
+@pytest.mark.parametrize("product", ["towel", "plate", "bag", "cup"])
+@pytest.mark.parametrize("prefix", ["Find", "Help me with"])
+def test_singular_household_paper_compounds_are_not_academic_requests(prefix, product):
+    signal = ResearchRoutingParser().parse(f"{prefix} paper {product}")
+
+    assert signal.decision == "none"
+    assert signal.needs_clarify is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Review this code and explain how papers are ranked",
+        "Review this code about papers",
+    ],
+)
+def test_review_does_not_capture_distant_or_unrelated_academic_words(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "none"
+    assert signal.needs_clarify is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Review the recent papers about graph reconstruction",
+        "Review the literature on graph reconstruction",
+    ],
+)
+def test_review_accepts_direct_collection_targets(message):
+    signal = ResearchRoutingParser().parse(message)
+
+    assert signal.decision == "allow"
+    assert signal.needs_clarify is False
+
+
 def test_signal_contract_is_bounded_to_routing_fields():
     signal = ResearchRoutingSignal(decision="allow", confidence=1.0)
 
