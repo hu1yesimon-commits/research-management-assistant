@@ -124,6 +124,80 @@ class StructuredLLMLeaderPlanner:
         return result
 
 
+class ResearchIntentParser:
+    """Recognize bounded requests to retrieve academic material."""
+
+    REQUEST_VERBS = frozenset(
+        {"find", "search", "discover", "recommend", "show", "need", "review"}
+    )
+    ACADEMIC_TARGETS = frozenset(
+        {
+            "paper",
+            "papers",
+            "literature",
+            "study",
+            "studies",
+            "article",
+            "articles",
+            "evidence",
+            "method",
+            "methods",
+        }
+    )
+    NEGATIONS = frozenset({"no", "not", "never"})
+    NON_ACADEMIC_PAPER_COMPOUNDS = frozenset(
+        {"towel", "towels", "plate", "plates", "bag", "bags", "cup", "cups"}
+    )
+    MAX_TARGET_DISTANCE = 8
+
+    def matches(self, message: str) -> bool:
+        tokens = self._tokenize(message)
+        for verb_index, target_start in self._request_starts(tokens):
+            target_limit = min(
+                len(tokens), target_start + self.MAX_TARGET_DISTANCE + 1
+            )
+            for target_index in range(target_start, target_limit):
+                if self._is_negated(tokens, verb_index, target_index):
+                    continue
+                if self._is_academic_target(tokens, target_index):
+                    return True
+        return False
+
+    @staticmethod
+    def _tokenize(message: str) -> list[str]:
+        normalized = message.lower().replace("don't", "do not")
+        return re.findall(r"[a-z0-9]+", normalized)
+
+    def _request_starts(self, tokens: list[str]):
+        for index, token in enumerate(tokens):
+            if token in self.REQUEST_VERBS:
+                target_start = index + 1
+                if target_start < len(tokens) and tokens[target_start] == "for":
+                    target_start += 1
+                yield index, target_start
+            elif token == "look" and tokens[index : index + 2] == ["look", "for"]:
+                yield index, index + 2
+
+    def _is_negated(
+        self, tokens: list[str], verb_index: int, target_index: int
+    ) -> bool:
+        prefix_start = max(0, verb_index - 3)
+        return any(
+            token in self.NEGATIONS
+            for token in tokens[prefix_start:target_index]
+        )
+
+    def _is_academic_target(self, tokens: list[str], index: int) -> bool:
+        token = tokens[index]
+        if token not in self.ACADEMIC_TARGETS:
+            return False
+        return not (
+            token == "paper"
+            and index + 1 < len(tokens)
+            and tokens[index + 1] in self.NON_ACADEMIC_PAPER_COMPOUNDS
+        )
+
+
 class DeterministicLeaderPlanner:
     """Offline routing for the fixed plan vocabulary."""
 
@@ -134,21 +208,7 @@ class DeterministicLeaderPlanner:
         if self._is_product_capability_question(normalized):
             return _bounded_plan("direct_reply", message)
 
-        asks_for_research = self._asks_for_paper_request(
-            normalized
-        ) or self._contains_term(
-            normalized,
-            (
-                "find",
-                "search",
-                "discover",
-                "look for",
-                "recent",
-                "newer",
-                "latest",
-                "fresh",
-            ),
-        )
+        asks_for_research = ResearchIntentParser().matches(normalized)
         asks_for_ideas = self._contains_term(
             normalized,
             ("idea", "ideas", "propose", "next test", "direction"),
@@ -227,17 +287,6 @@ class DeterministicLeaderPlanner:
         return bool(
             re.search(r"\b(?:create|add|spawn)\b.{0,40}\bagent\b", message)
         )
-
-    @staticmethod
-    def _asks_for_paper_request(message: str) -> bool:
-        return bool(
-            re.search(
-                r"\b(?:recommend(?:\s+me)?|show\s+me|give\s+me|need|request)"
-                r"\s+(?:some\s+)?(?:papers?|literature)\b",
-                message,
-            )
-        )
-
 
 class DeterministicLeaderResponder:
     """Summarize typed execution outcomes without generating new evidence."""

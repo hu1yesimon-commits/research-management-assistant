@@ -261,6 +261,25 @@ def test_deterministic_planner_recognizes_explicit_paper_requests(message):
     assert PlanValidator().validate(plan) is plan
 
 
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Recommend three relevant papers about graph reconstruction", "research"),
+        ("Recommend relevant papers", "research"),
+        ("I do not need papers about X", "clarify"),
+        ("Find no papers about X", "clarify"),
+        ("I need paper towels", "clarify"),
+    ],
+)
+def test_deterministic_planner_parses_bounded_research_intent(message, expected):
+    planner_input = make_input(message)
+
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+
+    assert plan.plan_type == expected
+    assert PlanValidator().validate(plan) is plan
+
+
 def test_prompt_builder_renders_each_few_shot_as_a_full_validated_plan():
     messages = LeaderPromptBuilder().messages(make_input("Find papers"))
     examples = messages[1:-1]
