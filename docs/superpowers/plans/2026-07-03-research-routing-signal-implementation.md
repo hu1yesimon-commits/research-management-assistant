@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the brittle Research keyword routing in the deterministic Leader with a private, clause-aware `ResearchRoutingSignal` that conservatively handles permission, prohibition, conflicts, and unrelated requests.
+**Goal:** Replace the brittle Research keyword routing in the deterministic Leader with a private, clause-aware `ResearchRoutingSignal` that distinguishes fresh discovery, existing-material review, prohibition, conflicts, and unrelated requests.
 
 **Architecture:** A focused `agent_team/research_routing.py` module owns Unicode normalization, bounded clause splitting, clause-local retrieval classification, and signal aggregation. `DeterministicLeaderPlanner` consumes the signal but remains responsible for Idea, Knowledge, clarification, and typed plan selection; `PlanValidator` and workflow dispatch remain unchanged.
 
@@ -58,7 +58,7 @@ def test_unicode_apostrophes_share_the_same_negation_semantics(message, expected
     assert ResearchRoutingParser().parse(message).decision == expected
 ```
 
-- [ ] **Step 2: Write failing clause, conflict, and ordinary-request tests**
+- [ ] **Step 2: Write failing clause, review, conflict, and none tests**
 
 Cover the frozen aggregation rules:
 
@@ -71,9 +71,8 @@ Cover the frozen aggregation rules:
         ("Do not search literature; find recent papers", "conflict", True),
         ("Find papers and search recent literature", "allow", False),
         ("Do not find papers and do not search literature", "deny", False),
-        ("Explain this function", "none", False),
-        ("Rewrite this paragraph", "none", False),
-        ("Read this code and explain the bug", "none", False),
+        ("Discuss graph reconstruction tradeoffs", "none", False),
+        ("Summarize the stated result", "none", False),
     ],
 )
 def test_clause_level_decisions(message, decision, needs_clarify):
@@ -92,6 +91,27 @@ def test_ambiguous_retrieval_language_requests_clarification():
     assert signal.decision == "conflict"
     assert signal.needs_clarify is True
     assert signal.confidence <= 0.5
+```
+
+Add the Research-domain review semantics:
+
+```python
+@pytest.mark.parametrize(
+    ("message", "decision", "needs_clarify"),
+    [
+        ("Review existing literature on graph reconstruction", "review_existing", False),
+        ("Review my saved papers", "review_existing", False),
+        ("Review the experiment logs", "review_existing", False),
+        ("Review my research notes", "review_existing", False),
+        ("Review papers about graph reconstruction", "conflict", True),
+        ("Review recent papers about graph reconstruction", "allow", False),
+        ("Review existing papers and find new papers", "allow", False),
+    ],
+)
+def test_review_routing_semantics(message, decision, needs_clarify):
+    signal = ResearchRoutingParser().parse(message)
+    assert signal.decision == decision
+    assert signal.needs_clarify is needs_clarify
 ```
 
 Also retain the established collision cases:
@@ -133,7 +153,7 @@ from pydantic import BaseModel, Field
 
 
 class ResearchRoutingSignal(BaseModel):
-    decision: Literal["allow", "deny", "conflict", "none"]
+    decision: Literal["allow", "deny", "review_existing", "conflict", "none"]
     needs_clarify: bool = False
     confidence: float = Field(ge=0.0, le=1.0)
 
@@ -149,15 +169,17 @@ Implementation requirements:
 - normalize `don't` to `do not` before tokenization;
 - split on `.`, `?`, `!`, `;`, `but`, `however`, and `yet`;
 - split on `and` only when the right side begins a bounded retrieval request or retrieval negation;
-- classify a clause as `allow` only when a request verb or `look for` is associated within eight tokens with `paper(s)`, `literature`, `study/studies`, `article(s)`, `evidence`, or `method(s)`;
+- classify a clause as `allow` only when an explicit fresh-retrieval verb (`find`, `search`, `discover`, `recommend`, `show`, `look for`) or fresh marker (`latest`, `recent`, `new papers`) is associated within eight tokens with `paper(s)`, `literature`, `study/studies`, `article(s)`, `evidence`, or `method(s)`;
 - allow count and relevance modifiers between request and target;
 - classify the same bounded expression as `deny` when `no`, `not`, `never`, or normalized `do not` occurs in that clause's request span;
+- classify `review existing literature`, `review my papers`, `review experiment logs`, `review notes`, and saved/current research-material equivalents as `review_existing`;
+- classify bare `review` plus an academic target as low-confidence `conflict` unless the same clause contains an explicit fresh-retrieval expression;
 - treat non-academic `paper towel(s)`, `paper plate(s)`, `paper bag(s)`, and `paper cup(s)` as no target;
-- aggregate allow-only, deny-only, conflict, and none exactly as the design specifies;
+- aggregate allow-only, deny-only, review-existing, conflict, and none exactly as the design specifies;
 - use confidence `1.0` for exact allow, deny, conflict, and confident none matches;
 - treat `help` and `want` as ambiguous request cues rather than retrieval permission verbs; when one occurs within eight tokens of an academic target without an exact allow or deny expression, use `conflict`, `needs_clarify=True`, and confidence at most `0.5`.
 
-Keep tokenization, clause splitting, clause classification, and aggregation in separate private methods. Do not return clauses or tool-policy fields.
+Keep tokenization, clause splitting, clause classification, and aggregation in separate private methods. Do not add code/function/text/file branches, return clauses, or add tool-policy fields.
 
 - [ ] **Step 5: Run parser tests to verify GREEN**
 
@@ -221,14 +243,15 @@ def test_explicit_research_denial_still_allows_idea_with_coverage(experiment_log
     assert plan.plan_type == "idea"
 
 
-@pytest.mark.parametrize(
-    "message",
-    ["Explain this function", "Rewrite this paragraph", "Read this code"],
-)
-def test_non_retrieval_requests_do_not_become_parser_clarifications(message):
-    signal = ResearchRoutingParser().parse(message)
-    assert signal.decision == "none"
-    assert signal.needs_clarify is False
+def test_existing_review_uses_knowledge_when_coverage_exists():
+    plan = make_plan("Review my saved papers", has_knowledge=True)
+    assert plan.plan_type == "knowledge_qa"
+
+
+def test_existing_review_clarifies_when_no_supported_material_is_available():
+    plan = make_plan("Review the experiment logs", has_knowledge=False)
+    assert plan.plan_type == "clarify"
+    assert plan.steps == []
 ```
 
 Retain all eight reviewed few-shot tests and validate every generated plan with `PlanValidator`.
@@ -261,12 +284,15 @@ if research_signal.needs_clarify or research_signal.decision == "conflict":
 
 research_allowed = research_signal.decision == "allow"
 research_denied = research_signal.decision == "deny"
+reviews_existing = research_signal.decision == "review_existing"
 ```
 
 Apply these rules before existing plan selection:
 
 - `research_allowed` plus Idea intent and experiment log -> `research_then_idea`;
 - `research_allowed` without Idea intent -> `research`;
+- `reviews_existing` plus current knowledge coverage -> `knowledge_qa`;
+- `reviews_existing` without current knowledge coverage -> `clarify` with no professional Agent steps;
 - Idea intent plus sufficient current knowledge -> `idea`, even when Research is denied;
 - Idea intent without sufficient knowledge and with Research denied -> `clarify` with no steps;
 - `none` leaves product, Knowledge, Idea, agent-creation, improve, and fallback behavior unchanged.

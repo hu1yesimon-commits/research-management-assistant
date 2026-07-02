@@ -36,7 +36,7 @@ A general `ToolRoutingSignal` with web/file/tool semantics requires a separate f
 
 ```python
 class ResearchRoutingSignal(BaseModel):
-    decision: Literal["allow", "deny", "conflict", "none"]
+    decision: Literal["allow", "deny", "review_existing", "conflict", "none"]
     needs_clarify: bool = False
     confidence: float = Field(ge=0.0, le=1.0)
 ```
@@ -48,13 +48,18 @@ The signal remains private to the deterministic planner. No API, persistence, or
 1. Normalize with Unicode NFKC and normalize curly apostrophes before tokenization.
 2. Split on sentence punctuation and semicolons; split on `but`, `however`, or `yet`; split on `and` only when its right-hand side begins another retrieval request or retrieval negation. Other uses of `and` remain inside the clause.
 3. Evaluate negation only inside its clause. A negation in one clause must not leak into another clause.
-4. Recognize retrieval only when a bounded request expression is associated with an academic retrieval target.
-5. Treat non-retrieval language such as explanation, rewriting, and code reading as `none`.
+4. Recognize fresh retrieval only when a bounded request expression is associated with an academic retrieval target.
+5. Recognize `review existing literature`, `review my papers`, `review experiment logs`, `review notes`, and equivalent saved/current research-material expressions as `review_existing`.
+6. Treat bare `review` plus an academic target as ambiguous unless the same clause contains an explicit fresh-retrieval expression such as `find`, `search`, `discover`, `recommend`, `show`, `look for`, `latest`, `recent`, or `new papers`.
+7. Unrelated language remains `none`; the parser does not contain branches for code, functions, text, files, or other general-assistant domains.
 
 Clause results combine as follows:
 
 - one or more `allow` clauses and no `deny` clauses -> `allow`;
 - one or more `deny` clauses and no `allow` clauses -> `deny`;
+- `review_existing` clauses without fresh retrieval -> `review_existing`;
+- explicit fresh retrieval in the same review request -> `allow`;
+- `deny` of fresh retrieval combined with `review_existing` -> `review_existing`;
 - both `allow` and `deny` clauses -> `conflict`, `needs_clarify=True`;
 - no retrieval clauses -> `none`, `needs_clarify=False`;
 - ambiguous retrieval language below the `0.75` confidence threshold -> `conflict`, `needs_clarify=True`.
@@ -69,10 +74,13 @@ The Leader combines the signal with existing semantic inputs:
 
 - `allow` permits `research` or, when Idea intent and an experiment log are present, `research_then_idea`.
 - `deny` prevents `research` and `research_then_idea`.
+- `review_existing` maps to `knowledge_qa` only when current saved-knowledge coverage is available; otherwise the Leader clarifies which existing research material should be reviewed.
 - `conflict` produces a bounded clarification plan with no professional Agent steps.
 - `none` leaves existing product, knowledge, Idea, and fallback routing unchanged.
 
 Idea remains outside the parser. Idea routing depends on Idea intent, `experiment_log`, and current knowledge coverage. If an Idea request lacks sufficient knowledge while research is explicitly denied, the Leader clarifies instead of silently running Research.
+
+`review_existing` is a research-domain routing signal, not a call to the fresh-discovery Research Agent. Under the frozen Agent ownership contract, saved-paper and confirmed-memory review uses `knowledge_qa`. Experiment-log or note review is recognized, but when no supported knowledge consumer is available the Leader clarifies rather than claiming an unsupported execution path.
 
 The resulting `LeaderPlan` still passes through `PlanValidator`. Multi-Agent execution remains the responsibility of the workflow and dispatcher.
 
@@ -88,11 +96,14 @@ Tests must cover:
 - clause-local negation;
 - allow-only, deny-only, parallel allow, and allow/deny conflict;
 - contrast and conjunction boundaries;
-- explicit academic retrieval with counts and modifiers;
+- explicit fresh academic retrieval with counts and modifiers;
 - non-academic paper compounds;
-- ordinary explanation, rewriting, and code-reading requests returning `none`;
+- review of existing literature, saved papers, experiment logs, and notes;
+- bare academic review returning low-confidence conflict;
+- review combined with explicit fresh-search language returning allow;
+- unrelated requests returning `none` without domain-specific branches;
 - Idea intent remaining outside the parser;
-- Leader integration for `allow`, `deny`, `conflict`, and `none`;
+- Leader integration for `allow`, `deny`, `review_existing`, `conflict`, and `none`;
 - all existing eight reviewed few-shot decisions;
 - full backend regression and `git diff --check`.
 
