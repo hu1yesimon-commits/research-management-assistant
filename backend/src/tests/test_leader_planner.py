@@ -226,6 +226,24 @@ def test_deterministic_planner_preserves_all_reviewed_few_shot_decisions():
         )
 
 
+@pytest.mark.parametrize(
+    ("message", "has_knowledge"),
+    [
+        ("Find papers about creating new agent architectures", False),
+        ("Search for ideal graph reconstruction methods", False),
+        ("Find recent papers that explain oversmoothing", True),
+    ],
+)
+def test_deterministic_planner_prioritizes_explicit_research_without_substring_collisions(
+    message, has_knowledge
+):
+    plan = DeterministicLeaderPlanner().plan(
+        make_input(message, has_knowledge=has_knowledge)
+    )
+
+    assert plan.plan_type == "research"
+
+
 def test_prompt_builder_renders_each_few_shot_as_a_full_validated_plan():
     messages = LeaderPromptBuilder().messages(make_input("Find papers"))
     examples = messages[1:-1]
@@ -373,6 +391,46 @@ def test_deterministic_responder_reports_partial_statuses_and_errors_without_evi
     assert "paper-" not in response
 
 
+def test_deterministic_responder_deduplicates_errors_across_agent_results():
+    planner_input = make_input(
+        "Find papers then propose ideas", experiment_log=make_log()
+    )
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+    repeated_error = "research evidence unavailable"
+    results = [
+        AgentResult(
+            agent_name="research",
+            action="recommend_papers",
+            status="failed",
+            errors=[
+                AgentError(
+                    agent_name="research",
+                    stage="search",
+                    message=repeated_error,
+                )
+            ],
+        ),
+        AgentResult(
+            agent_name="idea",
+            action="generate_ideas",
+            status="skipped",
+            errors=[
+                AgentError(
+                    agent_name="idea",
+                    stage="dependency",
+                    message=repeated_error,
+                )
+            ],
+        ),
+    ]
+
+    response = DeterministicLeaderResponder().respond(
+        planner_input, plan, results
+    )
+
+    assert response.count(f"error: {repeated_error}") == 1
+
+
 @pytest.mark.parametrize(
     ("message", "expected"),
     [
@@ -394,6 +452,15 @@ def test_provider_name_validation_is_explicit_and_never_falls_back():
         assert validate_provider_name(provider) == provider
     with pytest.raises(ValueError, match="Unsupported provider"):
         validate_provider_name("unknown")
+
+
+@pytest.mark.parametrize(
+    ("field", "provider"),
+    [("leader_provider", "unknown"), ("summary_provider", "bogus")],
+)
+def test_config_rejects_unknown_agent_team_providers(field, provider):
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        Config(**{field: provider})
 
 
 def test_agent_team_config_defaults_are_bounded_and_offline():

@@ -4,6 +4,8 @@ load_dotenv()
 import os
 from dataclasses import dataclass
 
+from agent_team.providers import validate_provider_name
+
 
 @dataclass
 class Config:
@@ -55,6 +57,10 @@ class Config:
     deepseek_api_key: str = ""
     deepseek_base_url: str = ""
     deepseek_model: str = "deepseek-chat"
+
+    def __post_init__(self):
+        self.leader_provider = validate_provider_name(self.leader_provider)
+        self.summary_provider = validate_provider_name(self.summary_provider)
 
 config = Config(
     arxiv_max_results=int(os.getenv("ARXIV_MAX_RESULTS", "10")),

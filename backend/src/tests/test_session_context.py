@@ -277,6 +277,41 @@ def test_llm_summary_includes_previous_summary_and_unsummarized_message_json(sto
     assert 'assistant: {"assistant_message": "assistant turn 1"}' in user_message[1]
 
 
+@pytest.mark.parametrize("content", [None, "", "   \n\t"])
+def test_llm_summary_rejects_missing_or_blank_content(stores, content):
+    session_store, _ = stores
+    _complete_turn(session_store, 1)
+    messages = session_store.list_messages("default")
+
+    with pytest.raises(ValueError, match="non-empty string"):
+        LLMSummaryGenerator(FakeSummaryChatModel(content=content)).summarize(
+            "old summary", messages
+        )
+
+
+@pytest.mark.parametrize("content", [None, "   "])
+def test_invalid_llm_summary_preserves_summary_and_boundary(stores, content):
+    session_store, _ = stores
+    _complete_turn(session_store, 1)
+    old_messages = session_store.list_messages("default")
+    session_store.update_session_summary(
+        "default", "old summary", old_messages[-1].id
+    )
+    for number in range(2, 8):
+        _complete_turn(session_store, number)
+
+    refreshed = SessionSummaryService(
+        session_store,
+        LLMSummaryGenerator(FakeSummaryChatModel(content=content)),
+        threshold=12,
+    ).maybe_refresh("default")
+
+    session = session_store.get_session("default")
+    assert refreshed is False
+    assert session["summary"] == "old summary"
+    assert session["summary_through_message_id"] == old_messages[-1].id
+
+
 def test_llm_summary_provider_failure_preserves_summary_and_boundary(stores):
     session_store, _ = stores
     _complete_turn(session_store, 1)

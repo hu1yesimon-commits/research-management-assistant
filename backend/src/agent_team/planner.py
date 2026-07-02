@@ -1,6 +1,7 @@
 """Bounded Leader planning and user-facing response generation."""
 
 import json
+import re
 from typing import Protocol
 
 from agent_team.contracts import (
@@ -10,9 +11,7 @@ from agent_team.contracts import (
     PlanStep,
 )
 from agent_team.prompts import FEW_SHOT_CASES, LEADER_SYSTEM_PROMPT
-
-
-SUPPORTED_PROVIDER_NAMES = frozenset({"deterministic", "openai", "deepseek"})
+from agent_team.providers import validate_provider_name
 
 
 class LeaderPlanner(Protocol):
@@ -28,16 +27,6 @@ class LeaderResponder(Protocol):
         results: list[AgentResult],
     ) -> str:
         """Return the Leader's final user-facing message."""
-
-
-def validate_provider_name(provider: str) -> str:
-    """Reject unknown providers before any dependency construction occurs."""
-    if provider not in SUPPORTED_PROVIDER_NAMES:
-        supported = ", ".join(sorted(SUPPORTED_PROVIDER_NAMES))
-        raise ValueError(
-            f"Unsupported provider {provider!r}; expected one of: {supported}"
-        )
-    return provider
 
 
 def _bounded_plan(
@@ -142,42 +131,25 @@ class DeterministicLeaderPlanner:
         message = planner_input.message.strip()
         normalized = message.lower()
 
-        asks_for_agent_creation = "agent" in normalized and any(
-            token in normalized for token in ("create", "add", "spawn", "new")
-        )
-        if asks_for_agent_creation:
-            return _bounded_plan(
-                "clarify",
-                message,
-                "The team has fixed Leader, Research, and Idea roles. What research "
-                "outcome should the existing team produce?",
-            )
-
         if self._is_product_capability_question(normalized):
             return _bounded_plan("direct_reply", message)
 
-        asks_about_saved_knowledge = planner_input.has_knowledge and any(
-            token in normalized
-            for token in ("explain", "saved", "knowledge", "what do")
-        )
-        if asks_about_saved_knowledge:
-            return _bounded_plan("knowledge_qa", message)
-
-        asks_for_research = any(
-            token in normalized
-            for token in (
+        asks_for_research = self._contains_term(
+            normalized,
+            (
                 "find",
                 "search",
-                "paper",
-                "papers",
-                "literature",
+                "discover",
+                "look for",
                 "recent",
                 "newer",
-            )
+                "latest",
+                "fresh",
+            ),
         )
-        asks_for_ideas = any(
-            token in normalized
-            for token in ("idea", "ideas", "propose", "next test", "direction")
+        asks_for_ideas = self._contains_term(
+            normalized,
+            ("idea", "ideas", "propose", "next test", "direction"),
         )
 
         if asks_for_research and asks_for_ideas:
@@ -203,6 +175,20 @@ class DeterministicLeaderPlanner:
         if asks_for_research:
             return _bounded_plan("research", message)
 
+        if self._asks_for_agent_creation(normalized):
+            return _bounded_plan(
+                "clarify",
+                message,
+                "The team has fixed Leader, Research, and Idea roles. What research "
+                "outcome should the existing team produce?",
+            )
+
+        asks_about_saved_knowledge = planner_input.has_knowledge and self._contains_term(
+            normalized, ("explain", "saved", "knowledge", "what do")
+        )
+        if asks_about_saved_knowledge:
+            return _bounded_plan("knowledge_qa", message)
+
         if normalized in {"improve it", "improve", "make it better"}:
             return _bounded_plan(
                 "clarify",
@@ -227,6 +213,19 @@ class DeterministicLeaderPlanner:
             )
         )
 
+    @staticmethod
+    def _contains_term(message: str, terms: tuple[str, ...]) -> bool:
+        return any(
+            re.search(rf"(?<!\w){re.escape(term)}(?!\w)", message)
+            for term in terms
+        )
+
+    @staticmethod
+    def _asks_for_agent_creation(message: str) -> bool:
+        return bool(
+            re.search(r"\b(?:create|add|spawn)\b.{0,40}\bagent\b", message)
+        )
+
 
 class DeterministicLeaderResponder:
     """Summarize typed execution outcomes without generating new evidence."""
@@ -248,6 +247,7 @@ class DeterministicLeaderResponder:
             return "No agent results were produced for this plan."
 
         lines = []
+        reported_errors: set[str] = set()
         for result in results:
             lines.append(
                 f"{result.agent_name} {result.action}: {result.status}"
@@ -256,6 +256,8 @@ class DeterministicLeaderResponder:
             for payload in (result.knowledge, result.research, result.idea):
                 if payload is not None and payload.error:
                     error_messages.append(payload.error)
-            for error_message in dict.fromkeys(error_messages):
-                lines.append(f"error: {error_message}")
+            for error_message in error_messages:
+                if error_message not in reported_errors:
+                    reported_errors.add(error_message)
+                    lines.append(f"error: {error_message}")
         return "\n".join(lines)

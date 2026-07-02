@@ -89,7 +89,9 @@ class LLMSummaryGenerator:
                 ),
             ]
         )
-        return str(response.content).strip()
+        if not isinstance(response.content, str) or not response.content.strip():
+            raise ValueError("summary provider must return a non-empty string")
+        return response.content.strip()
 
 
 class SessionSummaryService:
