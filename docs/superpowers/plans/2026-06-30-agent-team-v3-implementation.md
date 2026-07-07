@@ -1457,7 +1457,7 @@ git commit -m "feat: dispatch synchronous agent tasks"
 - Create: `backend/src/tests/test_conversation_service.py`
 - Modify: `backend/src/services/session_schemas.py`
 
-- [ ] **Step 1: Define the Turn request/response contracts**
+- [x] **Step 1: Define the Turn request/response contracts**
 
 ```python
 class SessionTurnRequest(BaseModel):
@@ -1481,7 +1481,7 @@ class SessionTurnResponse(BaseModel):
     errors: list[AgentError] = Field(default_factory=list)
 ```
 
-- [ ] **Step 2: Write failing orchestration tests**
+- [x] **Step 2: Write failing orchestration tests**
 
 Cover:
 
@@ -1512,7 +1512,7 @@ def test_turn_timeout_marks_turn_failed(service_with_expired_deadline):
     assert service_with_expired_deadline.store.latest_turn("default")["status"] == "failed"
 ```
 
-- [ ] **Step 3: Implement the orchestration sequence**
+- [x] **Step 3: Implement the orchestration sequence**
 
 `ConversationService.run()` must execute exactly:
 
@@ -1551,11 +1551,11 @@ return response
 
 Catch `PlanValidationError` and produce a clarification response without dispatch. Catch expected service failures as structured partial errors. On an unexpected exception, call `fail_turn()` and re-raise.
 
-- [ ] **Step 4: Ensure direct reply and clarification remain bounded**
+- [x] **Step 4: Ensure direct reply and clarification remain bounded**
 
 `direct_reply` and `clarify` execute no professional Agent Run. Clarification uses `plan.clarification_question`; direct reply uses `LeaderResponder`. Neither creates a Candidate Batch.
 
-- [ ] **Step 5: Run orchestration tests and Phase 3 review**
+- [x] **Step 5: Run orchestration tests and Phase 3 review**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_conversation_service.py backend/src/tests/test_agent_dispatcher.py backend/src/tests/test_leader_planner.py -q
@@ -1565,7 +1565,7 @@ git diff --check
 
 Expected: PASS. Review that Leader is the only user-facing component, no loops exist, Research exclusively owns fresh Candidate creation, and Idea receives evidence rather than running fresh discovery.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/services/conversation_service.py backend/src/services/session_schemas.py backend/src/tests/test_conversation_service.py
@@ -2309,4 +2309,15 @@ Verification commands and results: exact Task 9 pytest passed with 22 tests; git
 Contract decisions made: Dispatcher is direct, bounded, and synchronous; dependencies are identified by Step ID; failed or timed-out dependencies persist downstream runs as skipped; typed service failures are recoverable AgentErrors; unexpected exceptions persist failed before re-raising; successful Agent Contexts remain concise and role-specific
 Known failures or blockers: several subagent dispatch attempts hit model capacity and left partial Task 9 changes, which were audited and recovered rather than discarded; an already-running Python thread cannot be forcibly killed after timeout and may finish provider-side work, while the dispatcher returns immediately, persists failure, cancels pending work, and skips dependents as required by the frozen ThreadPoolExecutor contract
 Next unblocked wave: Wave 8, GPT-5.5 high, Task 10
+```
+
+```text
+Wave: 8
+Owner model: GPT-5.5 high responsibility for Task 10 turn orchestration, replay, deadline, and terminal-state semantics
+Completed task commits: 904edd0; 7a1ff7f; 9b8aec3
+Current worktree and branch: /Users/nuonuohu/Developer/graphReconstruction/.worktrees/agent-team-v3; codex/agent-team-v3
+Verification commands and results: focused ConversationService/dispatcher/planner pytest passed with 82 tests; full backend pytest passed with 429 tests and 1 existing Starlette/httpx deprecation warning; git diff --check passed; final independent task review approved with no findings
+Contract decisions made: the turn path is start-or-replay, context, retrieval, validated bounded plan, direct dispatcher, Leader response, persistence, then non-fatal summary refresh; replay bypasses replanning; invalid plans clarify without professional runs; direct_reply and clarify create no professional runs; candidate expiration is never rolled back; user selected timeout Option A so a crossed timeout fixes the failed outcome but joins the running callable before Agent Run and Turn terminal persistence, preventing hidden workers and late side effects
+Known failures or blockers: initial implementation required review fixes for per-step Turn deadlines and post-completion summary failure isolation; immediate ThreadPool timeout conflicted with truthful terminal state, resolved by user-selected join-before-terminal semantics; timeout is therefore not an immediate-return guarantee
+Next unblocked wave: Wave 9, GPT-5.4 medium, Tasks 11-12
 ```
