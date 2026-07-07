@@ -13,7 +13,11 @@ from agent_team.validator import PlanValidator
 from config import config
 from graph.builder import build_paper_discovery_graph
 from services.answer_service import AnswerGenerator, FakeGroundedAnswerGenerator, LLMAnswerGenerator, PromptBuilder
-from services.candidate_lifecycle import CandidateExpiredError, CandidateLifecycleService
+from services.candidate_lifecycle import (
+    CandidateExpiredError,
+    CandidateLifecycleService,
+    CandidateNotFoundError,
+)
 from services.conversation_service import ConversationService
 from services.embedding_pipeline import EmbeddingPipelineError, EmbeddingPipelineService
 from services.embedding_service import BgeM3EmbeddingService, EmbeddingService, FakeEmbeddingService
@@ -103,10 +107,14 @@ def reset_embedding_service_cache() -> None:
     _get_cached_embedding_service.cache_clear()
 
 
-def get_memory_store(database_path: str | None = None) -> MemoryStore:
-    store = MemoryStore(database_path or config.database_path)
+def create_memory_store(database_path: str) -> MemoryStore:
+    store = MemoryStore(database_path)
     store.initialize()
     return store
+
+
+def get_memory_store() -> MemoryStore:
+    return create_memory_store(config.database_path)
 
 
 def get_memory_service(store: MemoryStore = Depends(get_memory_store)) -> MemoryService:
@@ -376,12 +384,18 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _require_default_session(session_id: str) -> None:
+    if session_id != "default":
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
 @app.post("/sessions/{session_id}/turns", response_model=SessionTurnResponse)
 def create_session_turn(
     session_id: str,
     request: SessionTurnRequest,
     service: ConversationService = Depends(get_conversation_service),
 ):
+    _require_default_session(session_id)
     try:
         return service.run(session_id, request)
     except SessionBusyError as exc:
@@ -395,6 +409,7 @@ def list_session_messages(
     limit: int = 50,
     store: SessionStore = Depends(get_session_store),
 ):
+    _require_default_session(session_id)
     bounded_limit = min(max(limit, 1), 100)
     messages = store.list_messages(
         session_id,
@@ -417,6 +432,7 @@ def list_active_candidates(
     session_id: str,
     service: CandidateLifecycleService = Depends(get_candidate_lifecycle_service),
 ):
+    _require_default_session(session_id)
     return service.list_active(session_id)
 
 
@@ -429,11 +445,12 @@ def accept_session_candidate(
     candidate_id: str,
     service: CandidateLifecycleService = Depends(get_candidate_lifecycle_service),
 ):
+    _require_default_session(session_id)
     try:
         return service.accept(session_id, candidate_id)
     except CandidateExpiredError as exc:
         raise HTTPException(status_code=409, detail="Candidate expired") from exc
-    except ValueError as exc:
+    except CandidateNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 

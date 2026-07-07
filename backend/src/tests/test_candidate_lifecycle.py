@@ -3,6 +3,7 @@ import pytest
 from services.candidate_lifecycle import (
     CandidateExpiredError,
     CandidateLifecycleService,
+    CandidateNotFoundError,
     paper_key,
 )
 from services.memory_store import MemoryStore
@@ -127,6 +128,11 @@ def test_accept_is_transactional_and_idempotent(candidate_service, active_candid
 def test_expired_candidate_cannot_be_accepted(candidate_service, expired_candidate):
     with pytest.raises(CandidateExpiredError):
         candidate_service.accept("default", expired_candidate.id)
+
+
+def test_unknown_candidate_raises_typed_lookup_error(candidate_service):
+    with pytest.raises(CandidateNotFoundError, match="candidate not found: missing"):
+        candidate_service.accept("default", "missing")
 
 
 def test_suppression_keys_include_saved_papers_and_last_expired_batch(

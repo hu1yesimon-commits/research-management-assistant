@@ -7,6 +7,7 @@ from config import config
 from graph.builder import build_paper_discovery_graph
 from main import (
     app,
+    create_memory_store,
     get_answer_generator,
     get_embedding_service,
     get_knowledge_base,
@@ -226,7 +227,7 @@ def make_paper(paper_id: str, doi: str) -> PaperMetadata:
 
 
 def override_store_with_path(test_db):
-    return lambda: get_memory_store(str(test_db))
+    return lambda: create_memory_store(str(test_db))
 
 
 def test_health_endpoint_returns_ok():
@@ -290,7 +291,7 @@ def test_get_paper_judge_builds_deepseek_provider_from_explicit_config(monkeypat
 
 def test_knowledge_search_returns_retrieved_results_for_embedded_chunks(tmp_path):
     test_db = tmp_path / "api-knowledge.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     vector_store = FakeVectorStoreService()
     paper = PaperMetadata(
         paper_id="knowledge-paper-1",
@@ -337,7 +338,7 @@ def test_knowledge_search_returns_retrieved_results_for_embedded_chunks(tmp_path
 
 def test_knowledge_search_returns_empty_results_when_no_embedded_chunks_exist(tmp_path):
     test_db = tmp_path / "api-knowledge-empty.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
 
     app.dependency_overrides[get_memory_store] = lambda: store
     app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
@@ -368,7 +369,7 @@ def test_knowledge_search_rejects_blank_query(tmp_path):
 
 def test_knowledge_answer_returns_answer_and_sources_for_embedded_chunks(tmp_path):
     test_db = tmp_path / "api-knowledge-answer.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     vector_store = FakeVectorStoreService()
     paper = PaperMetadata(
         paper_id="knowledge-answer-paper-1",
@@ -417,7 +418,7 @@ def test_knowledge_answer_returns_answer_and_sources_for_embedded_chunks(tmp_pat
 
 def test_knowledge_answer_returns_fallback_when_no_results_exist(tmp_path):
     test_db = tmp_path / "api-knowledge-answer-empty.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
 
     app.dependency_overrides[get_memory_store] = lambda: store
     app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
@@ -451,7 +452,7 @@ def test_knowledge_answer_rejects_blank_question(tmp_path):
 
 def test_research_query_returns_discovery_and_knowledge_sections(tmp_path):
     test_db = tmp_path / "api-research-query.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     workflow = ResearchWorkflowService(
         discovery_graph=FakeGraph(store),
         knowledge_qa_service=FakeKnowledgeQAService(),
@@ -478,7 +479,7 @@ def test_research_query_returns_discovery_and_knowledge_sections(tmp_path):
 
 def test_research_query_rejects_blank_query(tmp_path):
     test_db = tmp_path / "api-research-query-blank.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     workflow = ResearchWorkflowService(
         discovery_graph=FakeGraph(store),
         knowledge_qa_service=FakeKnowledgeQAService(),
@@ -497,7 +498,7 @@ def test_research_query_rejects_blank_query(tmp_path):
 
 def test_research_query_rejects_when_both_sections_disabled(tmp_path):
     test_db = tmp_path / "api-research-query-disabled.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     workflow = ResearchWorkflowService(
         discovery_graph=FakeGraph(store),
         knowledge_qa_service=FakeKnowledgeQAService(),
@@ -523,7 +524,7 @@ def test_research_query_rejects_when_both_sections_disabled(tmp_path):
 
 def test_research_assistant_basic_explore_response(tmp_path):
     test_db = tmp_path / "api-research-assistant.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     workflow = ResearchAssistantWorkflowService(
         store=store,
         discovery_graph=FakeGraph(store),
@@ -571,7 +572,7 @@ def test_research_assistant_basic_explore_response(tmp_path):
 
 def test_research_assistant_rejects_blank_query(tmp_path):
     test_db = tmp_path / "api-research-assistant-blank.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     workflow = ResearchAssistantWorkflowService(
         store=store,
         discovery_graph=FakeGraph(store),
@@ -592,7 +593,7 @@ def test_research_assistant_rejects_blank_query(tmp_path):
 
 def test_research_assistant_research_include_discovery_uses_default_dependency_graph(tmp_path):
     test_db = tmp_path / "api-research-assistant-discovery.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
 
     app.dependency_overrides[get_memory_store] = lambda: store
     app.dependency_overrides[get_paper_discovery_graph] = lambda: FakeGraph(store)
@@ -694,7 +695,7 @@ def test_experiment_logs_endpoint_saves_and_lists_structured_logs(tmp_path):
 
 def test_ideas_recommend_endpoint_returns_deterministic_no_source_ideas(tmp_path):
     test_db = tmp_path / "api-ideas.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
 
     app.dependency_overrides[get_memory_store] = lambda: store
     app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
@@ -756,7 +757,7 @@ def test_candidates_endpoint_returns_empty_list(tmp_path):
 
 def test_memory_candidate_refresh_list_accept_and_semantic_list(tmp_path):
     test_db = tmp_path / "api-memory.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     for _ in range(3):
         store.add_experiment_log_entry(
             {
@@ -795,7 +796,7 @@ def test_memory_candidate_refresh_list_accept_and_semantic_list(tmp_path):
 
 def test_memory_candidate_reject_does_not_create_semantic_memory(tmp_path):
     test_db = tmp_path / "api-memory-reject.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     candidate_id = store.upsert_memory_candidate(
         {
             "candidate_type": "semantic_proposal",
@@ -827,7 +828,7 @@ def test_memory_candidate_reject_does_not_create_semantic_memory(tmp_path):
 
 def test_memory_semantic_archive_hides_entry_from_default_list(tmp_path):
     test_db = tmp_path / "api-memory-archive.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     candidate_id = store.upsert_memory_candidate(
         {
             "candidate_type": "semantic_proposal",
@@ -864,7 +865,7 @@ def test_memory_semantic_archive_hides_entry_from_default_list(tmp_path):
 
 def test_search_returns_candidates_without_persisting_to_sqlite(tmp_path):
     test_db = tmp_path / "api.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
 
     app.dependency_overrides[get_memory_store] = lambda: store
     app.dependency_overrides[get_paper_discovery_graph] = lambda: build_paper_discovery_graph(
@@ -894,7 +895,7 @@ def test_search_returns_candidates_without_persisting_to_sqlite(tmp_path):
 
 def test_advanced_search_uses_deterministic_memory_context_rewriting(tmp_path):
     test_db = tmp_path / "api-advanced.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     store.add_experiment_log(
         "legacy model is too heavy and needs better interpretability",
         tags=["legacy"],
@@ -938,7 +939,7 @@ def test_advanced_search_uses_deterministic_memory_context_rewriting(tmp_path):
 
 def test_memory_summary_returns_review_and_confirmed_counts(tmp_path):
     test_db = tmp_path / "api-memory-summary.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     pending_candidate_id = store.upsert_memory_candidate(make_memory_candidate())
     accepted_candidate_id = store.upsert_memory_candidate(
         make_memory_candidate(
@@ -978,7 +979,7 @@ def test_memory_summary_returns_review_and_confirmed_counts(tmp_path):
 
 def test_memory_summary_returns_true_saved_paper_counts_above_list_limit(tmp_path):
     test_db = tmp_path / "api-memory-summary-count.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
 
     for index in range(101):
         paper_id = f"saved-paper-{index}"
@@ -1003,7 +1004,7 @@ def test_memory_summary_returns_true_saved_paper_counts_above_list_limit(tmp_pat
 
 def test_research_query_discovery_returns_candidates_without_persisting_to_sqlite(tmp_path):
     test_db = tmp_path / "api-research-query-no-persist.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     workflow = ResearchWorkflowService(
         discovery_graph=build_paper_discovery_graph(
             search_service=FakeSearchService(),
@@ -1038,7 +1039,7 @@ def test_research_query_discovery_returns_candidates_without_persisting_to_sqlit
 def test_upload_pdf_updates_candidate_to_uploaded_and_known_doi(tmp_path):
     test_db = tmp_path / "api-upload.sqlite3"
     upload_dir = tmp_path / "uploads"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="upload-paper-1",
         source_ids=PaperId(doi="10.1000/upload-paper-1"),
@@ -1076,7 +1077,7 @@ def test_upload_pdf_updates_candidate_to_uploaded_and_known_doi(tmp_path):
 
 def test_accept_existing_paper_without_body_updates_status_as_compatibility_path(tmp_path):
     test_db = tmp_path / "api-accept.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="accept-paper-1",
         source_ids=PaperId(doi="10.1000/accept-paper-1"),
@@ -1201,7 +1202,7 @@ def test_accept_rejects_mismatched_path_and_body_paper_id(tmp_path):
 def test_embed_updates_uploaded_paper_to_chunked_and_persists_chunks(tmp_path):
     test_db = tmp_path / "api-embed.sqlite3"
     upload_dir = tmp_path / "uploads"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="embed-paper-1",
         source_ids=PaperId(doi="10.1000/embed-paper-1"),
@@ -1248,7 +1249,7 @@ def test_embed_updates_uploaded_paper_to_chunked_and_persists_chunks(tmp_path):
 
 def test_embed_returns_400_for_paper_that_is_not_uploaded(tmp_path):
     test_db = tmp_path / "api-embed-not-uploaded.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="embed-paper-2",
         source_ids=PaperId(doi="10.1000/embed-paper-2"),
@@ -1284,7 +1285,7 @@ def test_embed_returns_404_for_unknown_paper(tmp_path):
 
 def test_embed_returns_400_for_uploaded_paper_with_missing_pdf_path(tmp_path):
     test_db = tmp_path / "api-embed-missing-pdf.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="embed-paper-missing-pdf",
         source_ids=PaperId(doi="10.1000/embed-paper-missing-pdf"),
@@ -1313,7 +1314,7 @@ def test_embed_returns_400_for_uploaded_paper_with_missing_pdf_path(tmp_path):
 def test_embed_keeps_uploaded_status_when_extraction_fails(tmp_path):
     test_db = tmp_path / "api-embed-extract-fail.sqlite3"
     upload_dir = tmp_path / "uploads"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="embed-paper-fail",
         source_ids=PaperId(doi="10.1000/embed-paper-fail"),
@@ -1347,7 +1348,7 @@ def test_embed_keeps_uploaded_status_when_extraction_fails(tmp_path):
 def test_embed_rebuild_overwrites_old_chunks_for_uploaded_paper(tmp_path):
     test_db = tmp_path / "api-embed-rebuild.sqlite3"
     upload_dir = tmp_path / "uploads"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="embed-paper-rebuild",
         source_ids=PaperId(doi="10.1000/embed-paper-rebuild"),
@@ -1389,7 +1390,7 @@ def test_embed_rebuild_overwrites_old_chunks_for_uploaded_paper(tmp_path):
 
 def test_embed_updates_chunked_paper_to_embedded_and_writes_vector_refs(tmp_path):
     test_db = tmp_path / "api-embed-vectors.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="chunked-paper-1",
         source_ids=PaperId(doi="10.1000/chunked-paper-1"),
@@ -1433,7 +1434,7 @@ def test_embed_updates_chunked_paper_to_embedded_and_writes_vector_refs(tmp_path
 
 def test_embed_returns_400_for_chunked_paper_with_no_chunks(tmp_path):
     test_db = tmp_path / "api-embed-no-chunks.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="chunked-paper-no-chunks",
         source_ids=PaperId(doi="10.1000/chunked-paper-no-chunks"),
@@ -1461,7 +1462,7 @@ def test_embed_returns_400_for_chunked_paper_with_no_chunks(tmp_path):
 
 def test_embed_keeps_chunked_status_when_embedding_fails(tmp_path):
     test_db = tmp_path / "api-embed-embedding-fail.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="chunked-paper-embedding-fail",
         source_ids=PaperId(doi="10.1000/chunked-paper-embedding-fail"),
@@ -1494,7 +1495,7 @@ def test_embed_keeps_chunked_status_when_embedding_fails(tmp_path):
 
 def test_embed_keeps_chunked_status_when_vector_store_write_fails(tmp_path):
     test_db = tmp_path / "api-embed-vector-store-fail.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="chunked-paper-vector-store-fail",
         source_ids=PaperId(doi="10.1000/chunked-paper-vector-store-fail"),
@@ -1527,7 +1528,7 @@ def test_embed_keeps_chunked_status_when_vector_store_write_fails(tmp_path):
 
 def test_embed_keeps_chunked_status_when_any_vector_ref_is_empty(tmp_path):
     test_db = tmp_path / "api-embed-empty-vector-ref.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     paper = PaperMetadata(
         paper_id="chunked-paper-empty-vector-ref",
         source_ids=PaperId(doi="10.1000/chunked-paper-empty-vector-ref"),
@@ -1563,7 +1564,7 @@ def test_embed_keeps_chunked_status_when_any_vector_ref_is_empty(tmp_path):
 
 def test_embed_replaces_stale_vector_refs_for_chunked_paper(tmp_path):
     test_db = tmp_path / "api-embed-replace-vector-refs.sqlite3"
-    store = get_memory_store(str(test_db))
+    store = create_memory_store(str(test_db))
     vector_store = FakeVectorStoreService()
     paper = PaperMetadata(
         paper_id="chunked-paper-rebuild",

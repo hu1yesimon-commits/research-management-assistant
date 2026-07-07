@@ -22,6 +22,12 @@ class CandidateExpiredError(RuntimeError):
         super().__init__(f"candidate {candidate_id!r} has expired")
 
 
+class CandidateNotFoundError(LookupError):
+    def __init__(self, candidate_id: str):
+        self.candidate_id = candidate_id
+        super().__init__(f"candidate not found: {candidate_id}")
+
+
 def paper_key(paper: dict) -> str:
     raw_doi = paper.get("doi") or (paper.get("source_ids") or {}).get("doi")
     if raw_doi:
@@ -209,7 +215,7 @@ class CandidateLifecycleService:
             ).fetchone()
             if row is None:
                 connection.rollback()
-                raise ValueError(f"candidate not found: {candidate_id}")
+                raise CandidateNotFoundError(candidate_id)
             if row["status"] == "accepted":
                 connection.commit()
                 return CandidateAcceptResponse(

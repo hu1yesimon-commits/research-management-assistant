@@ -195,3 +195,46 @@ def test_turn_request_validation_is_bounded(client):
     assert blank.status_code == 422
     assert oversized_key.status_code == 422
     assert excessive_top_k.status_code == 422
+
+
+def test_database_path_is_not_a_public_dependency_parameter(client, tmp_path):
+    rogue_path = tmp_path / "rogue.sqlite3"
+    schema = app.openapi()
+    paper_parameters = schema["paths"]["/papers"]["get"].get("parameters", [])
+
+    response = client.get("/papers", params={"database_path": str(rogue_path)})
+
+    assert all(parameter["name"] != "database_path" for parameter in paper_parameters)
+    assert response.status_code == 200
+    assert not rogue_path.exists()
+    assert (
+        main.get_memory_store().database_path
+        == main.get_session_store().database_path
+    )
+    assert (
+        main.get_memory_store().database_path
+        == main.get_candidate_lifecycle_service().database_path
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json"),
+    [
+        (
+            "post",
+            "/sessions/other/turns",
+            {"message": "What can you do?", "idempotency_key": "other"},
+        ),
+        ("get", "/sessions/other/messages", None),
+        ("get", "/sessions/other/candidates/active", None),
+        ("post", "/sessions/other/candidates/missing/accept", None),
+    ],
+)
+def test_non_default_sessions_are_consistently_rejected_without_creation(
+    client, method, path, json
+):
+    response = client.request(method, path, json=json)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Session not found"
+    assert main.get_session_store().get_session("other") is None
