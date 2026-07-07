@@ -1,9 +1,13 @@
-from typing import Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
 from services.schemas import ExperimentLogRequest, IdeaResult, KnowledgeResult
-from services.session_schemas import SessionContext
+
+if TYPE_CHECKING:
+    from services.session_schemas import SessionContext
 
 
 PlanType = Literal[
@@ -80,3 +84,8 @@ class AgentRunSummary(BaseModel):
     agent_name: str
     action: str
     status: Literal["completed", "failed", "skipped"]
+
+
+from services.session_schemas import SessionContext
+
+PlannerInput.model_rebuild()

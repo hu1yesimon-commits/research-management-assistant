@@ -311,8 +311,10 @@ def make_dispatcher(store, research_agent):
 class StubKnowledgeService:
     def __init__(self, error=None):
         self.error = error
+        self.received = None
 
     def answer(self, **kwargs):
+        self.received = kwargs
         if self.error is not None:
             raise self.error
         return KnowledgeAnswerResponse(
@@ -436,6 +438,26 @@ def test_typed_knowledge_failure_is_recoverable_and_persisted(dispatch_store):
         ).fetchone()
     assert status == "failed"
     assert "retrieval unavailable" in error_json
+
+
+def test_knowledge_dispatch_reuses_prefetched_results(dispatch_store):
+    store, turn_id = dispatch_store
+    knowledge_service = StubKnowledgeService()
+    dispatcher = DirectAgentDispatcher(
+        knowledge_service=knowledge_service,
+        research_agent=None,
+        idea_agent=None,
+        session_store=store,
+        agent_step_timeout_seconds=0.05,
+    )
+    context = make_context().model_copy(update={"current_knowledge": []})
+
+    result = dispatcher.execute(
+        "default", turn_id, knowledge_plan(), None, context
+    )[0]
+
+    assert result.status == "completed"
+    assert knowledge_service.received["retrieved_results"] is context.current_knowledge
 
 
 def test_unexpected_exception_persists_failed_then_reraises(dispatch_store):

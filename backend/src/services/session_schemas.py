@@ -2,7 +2,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from services.schemas import JudgeResult, KnowledgeSearchResult, PaperMetadata
+from services.schemas import (
+    ExperimentLogRequest,
+    IdeaOption,
+    JudgeResult,
+    KnowledgeResult,
+    KnowledgeSearchResult,
+    PaperMetadata,
+)
 
 
 class StartTurnResult(BaseModel):
@@ -67,3 +74,29 @@ class SavedPaper(BaseModel):
     authors: list[str] = Field(default_factory=list)
     status: Literal["accepted", "uploaded", "chunked", "embedded"]
     pdf_path: str | None = None
+
+
+class SessionTurnRequest(BaseModel):
+    message: str = Field(min_length=1)
+    experiment_log: ExperimentLogRequest | None = None
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    top_k: int = Field(default=5, ge=1, le=20)
+    idea_count: int = Field(default=3, ge=3, le=5)
+
+
+from agent_team.contracts import AgentError, AgentRunSummary, LeaderPlan
+
+
+class SessionTurnResponse(BaseModel):
+    session_id: str
+    turn_id: str
+    status: Literal["running", "completed", "failed"]
+    assistant_message: str = ""
+    plan: LeaderPlan | None = None
+    active_candidates: list[SessionCandidate] = Field(default_factory=list)
+    knowledge: KnowledgeResult = Field(
+        default_factory=lambda: KnowledgeResult(enabled=False)
+    )
+    ideas: list[IdeaOption] = Field(default_factory=list)
+    agent_runs: list[AgentRunSummary] = Field(default_factory=list)
+    errors: list[AgentError] = Field(default_factory=list)

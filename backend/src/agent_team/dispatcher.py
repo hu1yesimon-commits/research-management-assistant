@@ -166,6 +166,7 @@ class DirectAgentDispatcher:
                 response = self.knowledge_service.answer(
                     question=step.input.get("question", ""),
                     top_k=step.input.get("top_k", 5),
+                    retrieved_results=context.current_knowledge,
                 )
             except QAServiceError as exc:
                 return AgentResult(
