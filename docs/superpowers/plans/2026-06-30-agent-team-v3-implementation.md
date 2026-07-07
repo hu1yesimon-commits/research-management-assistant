@@ -1361,7 +1361,7 @@ git commit -m "feat: add research and idea agents"
 - Modify: `backend/src/tests/test_agent_dispatcher.py`
 - Modify: `backend/src/services/session_store.py`
 
-- [ ] **Step 1: Write failing dispatch and dependency tests**
+- [x] **Step 1: Write failing dispatch and dependency tests**
 
 ```python
 def test_research_then_idea_passes_research_output_to_idea(dispatcher, plan, experiment_log):
@@ -1394,7 +1394,7 @@ def test_agent_step_timeout_becomes_typed_failure(timeout_dispatcher, research_p
     assert results[0].errors[0].stage == "timeout"
 ```
 
-- [ ] **Step 2: Implement `AgentDispatcher` and `DirectAgentDispatcher`**
+- [x] **Step 2: Implement `AgentDispatcher` and `DirectAgentDispatcher`**
 
 ```python
 class AgentDispatcher(Protocol):
@@ -1418,7 +1418,7 @@ Dispatch rules:
 - Typed service errors become recoverable `AgentError`; unexpected exceptions complete the run as failed and re-raise.
 - Run each step through a `ThreadPoolExecutor` and call `future.result(timeout=agent_step_timeout_seconds)`. On timeout, mark the Run failed with stage `timeout`, call `executor.shutdown(wait=False, cancel_futures=True)`, and continue only when no later Step depends on it.
 
-- [ ] **Step 3: Persist role-specific context after successful runs**
+- [x] **Step 3: Persist role-specific context after successful runs**
 
 Update only the executing Agent's context. Use concise structured summaries:
 
@@ -1429,7 +1429,7 @@ idea_summary = f"experiment={experiment_log.task}; ideas={', '.join(idea.title f
 
 Do not copy the full Leader message history into Research or Idea context.
 
-- [ ] **Step 4: Run dispatcher tests**
+- [x] **Step 4: Run dispatcher tests**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_agent_dispatcher.py backend/src/tests/test_session_store.py -q
@@ -1437,7 +1437,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_agent
 
 Expected: PASS for single-step dispatch, fixed two-step dependency, skip behavior, partial failure, and Agent Run persistence.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/agent_team/dispatcher.py backend/src/services/session_store.py backend/src/tests/test_agent_dispatcher.py
@@ -2298,4 +2298,15 @@ Verification commands and results: exact Task 8 pytest passed with 19 tests; Ruf
 Contract decisions made: Research exclusively owns fresh Discovery, fresh filtering, and Candidate Batch creation; Idea always consumes an explicit evidence list with include_discovery=False; legacy Idea discovery remains available only when discovery_candidates is None and include_discovery=True; judge failures remain typed AgentResult errors because frozen ResearchResult has no judge-failure field
 Known failures or blockers: initial Task 8 subagent dispatch hit model capacity and was retried without code changes; no implementation blockers remain
 Next unblocked wave: Wave 7, GPT-5.5 high, Task 9
+```
+
+```text
+Wave: 7
+Owner model: GPT-5.5 high responsibility for Task 9 dispatcher, timeout, dependency, and terminal-state semantics
+Completed task commits: 79705e4
+Current worktree and branch: /Users/nuonuohu/Developer/graphReconstruction/.worktrees/agent-team-v3; codex/agent-team-v3
+Verification commands and results: exact Task 9 pytest passed with 22 tests; git diff --check passed; independent task review approved with no findings
+Contract decisions made: Dispatcher is direct, bounded, and synchronous; dependencies are identified by Step ID; failed or timed-out dependencies persist downstream runs as skipped; typed service failures are recoverable AgentErrors; unexpected exceptions persist failed before re-raising; successful Agent Contexts remain concise and role-specific
+Known failures or blockers: several subagent dispatch attempts hit model capacity and left partial Task 9 changes, which were audited and recovered rather than discarded; an already-running Python thread cannot be forcibly killed after timeout and may finish provider-side work, while the dispatcher returns immediately, persists failure, cancels pending work, and skips dependents as required by the frozen ThreadPoolExecutor contract
+Next unblocked wave: Wave 8, GPT-5.5 high, Task 10
 ```
