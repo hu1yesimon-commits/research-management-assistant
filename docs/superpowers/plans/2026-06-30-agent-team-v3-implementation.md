@@ -1585,7 +1585,7 @@ git commit -m "feat: orchestrate persistent agent turns"
 - Create: `backend/src/tests/test_session_api.py`
 - Modify: `backend/src/tests/test_api_mvp.py`
 
-- [ ] **Step 1: Write failing API contract tests**
+- [x] **Step 1: Write failing API contract tests**
 
 ```python
 def test_default_session_turn_and_history(client):
@@ -1608,11 +1608,11 @@ def test_expired_candidate_accept_returns_409(client, expired_candidate):
     assert response.json()["detail"] == "Candidate expired"
 ```
 
-- [ ] **Step 2: Add dependency constructors**
+- [x] **Step 2: Add dependency constructors**
 
 Add cached or request-scoped constructors for `SessionStore`, `CandidateLifecycleService`, Context/Summary services, Leader Planner/Responder, Research/Idea Agents, Direct Dispatcher, and `ConversationService`. All must use the same configured SQLite path and existing discovery/QA/Idea dependencies.
 
-- [ ] **Step 3: Add endpoints**
+- [x] **Step 3: Add endpoints**
 
 ```python
 @app.post("/sessions/{session_id}/turns", response_model=SessionTurnResponse)
@@ -1646,11 +1646,11 @@ def list_saved_papers(store: MemoryStore = Depends(get_memory_store)):
     return store.list_saved_papers()
 ```
 
-- [ ] **Step 4: Preserve compatibility**
+- [x] **Step 4: Preserve compatibility**
 
 Keep `/research/assistant`, `/research/query`, `/papers/candidates`, and `/papers/{paper_id}/accept`. Add deprecation text to the OpenAPI description of legacy Candidate endpoints, but do not change their current behavior in this task.
 
-- [ ] **Step 5: Run API and backend tests**
+- [x] **Step 5: Run API and backend tests**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_session_api.py backend/src/tests/test_api_mvp.py -q
@@ -1659,7 +1659,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests -q
 
 Expected: PASS for Turn creation, replay, history pagination, Session busy, active Candidates, 409 expiry, Saved Papers, and legacy endpoints.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/main.py backend/src/tests/test_session_api.py backend/src/tests/test_api_mvp.py
@@ -2320,4 +2320,15 @@ Verification commands and results: focused ConversationService/dispatcher/planne
 Contract decisions made: the turn path is start-or-replay, context, retrieval, validated bounded plan, direct dispatcher, Leader response, persistence, then non-fatal summary refresh; replay bypasses replanning; invalid plans clarify without professional runs; direct_reply and clarify create no professional runs; candidate expiration is never rolled back; user selected timeout Option A so a crossed timeout fixes the failed outcome but joins the running callable before Agent Run and Turn terminal persistence, preventing hidden workers and late side effects
 Known failures or blockers: initial implementation required review fixes for per-step Turn deadlines and post-completion summary failure isolation; immediate ThreadPool timeout conflicted with truthful terminal state, resolved by user-selected join-before-terminal semantics; timeout is therefore not an immediate-return guarantee
 Next unblocked wave: Wave 9, GPT-5.4 medium, Tasks 11-12
+```
+
+```text
+Wave: 9 (partial; paused after Task 11 by user request)
+Owner model: GPT-5.4 medium for Task 11 API wiring, with independent contract and quality review
+Completed task commits: 5322808; 62be2fd
+Current worktree and branch: /Users/nuonuohu/Developer/graphReconstruction/.worktrees/agent-team-v3; codex/agent-team-v3
+Verification commands and results: focused session/API pytest passed with 62 tests and 1 existing warning; full backend pytest passed with 445 tests and 1 existing Starlette/httpx deprecation warning; git diff --check passed; independent task re-review approved with no findings
+Contract decisions made: all new API dependencies share config.database_path and database_path is not public input; the V3 HTTP boundary supports only the default permanent session and consistently rejects non-default IDs without creating sessions; candidate absence maps through typed CandidateNotFoundError to 404 while expiry remains 409; legacy endpoints remain behavior-compatible and carry deprecation metadata only
+Known failures or blockers: initial review found injectable database_path, inconsistent non-default-session behavior, and broad ValueError mapping; all were fixed by 62be2fd; no remaining Task 11 blocker
+Next unblocked wave: resume Wave 9 with Task 12 Session Chat Frontend; execution intentionally paused before Task 12 per user request
 ```
