@@ -3,7 +3,7 @@
     <div class="panel__heading">
       <div>
         <h2>Idea Assistant</h2>
-        <p>Structured experiment logs in, deterministic idea options out. This stays inside the workbench.</p>
+        <p>Structured experiment logs stay explicit here. Session Chat handles research and knowledge QA; this panel remains the manual idea workflow.</p>
       </div>
       <span class="badge" :class="isBusy ? 'badge--muted' : 'badge--active'">
         {{ isBusy ? "Generating" : "Ready" }}

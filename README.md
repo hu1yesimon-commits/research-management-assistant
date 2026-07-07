@@ -176,6 +176,18 @@ Optional real providers:
 
 默认行为保持 deterministic 和 offline。默认测试路径不会真实调用 DeepSeek、OpenAI、BGE-M3、Chroma、arXiv 或 OpenAlex；这些真实 provider / 外部源路径如果将来需要启用，应走显式配置和单独的手动 smoke。
 
+如果要演示 Agent Team V3 的真实 Knowledge QA 路径，请显式切到 demo 环境，而不是修改默认离线配置：
+
+```bash
+export VECTOR_BACKEND=chroma
+export EMBEDDING_PROVIDER=bge-m3
+export CHROMA_PERSIST_DIR=backend/data/vector_store/chroma
+export ANSWER_PROVIDER=deepseek
+export LEADER_RESPONSE_PROVIDER=deepseek
+export DEEPSEEK_API_KEY=...
+export DEEPSEEK_BASE_URL=...
+```
+
 Idea 的 `supporting_evidence` 只能来自 retrieval / discovery 返回对象，generator 不应编造 papers、chunks、citations 或 source details。
 
 `known DOI` 规则当前是：

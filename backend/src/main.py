@@ -6,8 +6,7 @@ from langchain_openai import ChatOpenAI
 
 from agent_team.dispatcher import DirectAgentDispatcher
 from agent_team.idea_agent import IdeaAgent
-from agent_team.planner import DeterministicLeaderResponder
-from agent_team.providers import build_leader_planner, build_summary_generator
+from agent_team.providers import build_leader_planner, build_leader_responder, build_summary_generator
 from agent_team.research_agent import ResearchAgent
 from agent_team.validator import PlanValidator
 from config import config
@@ -320,8 +319,8 @@ def get_leader_planner():
     return build_leader_planner(config)
 
 
-def get_leader_responder() -> DeterministicLeaderResponder:
-    return DeterministicLeaderResponder()
+def get_leader_responder():
+    return build_leader_responder(config)
 
 
 def get_research_agent(
@@ -362,7 +361,7 @@ def get_conversation_service(
     knowledge_retrieval: KnowledgeRetrievalService = Depends(get_knowledge_retrieval_service),
     planner=Depends(get_leader_planner),
     dispatcher: DirectAgentDispatcher = Depends(get_direct_agent_dispatcher),
-    responder: DeterministicLeaderResponder = Depends(get_leader_responder),
+    responder=Depends(get_leader_responder),
     summary_service: SessionSummaryService = Depends(get_session_summary_service),
 ) -> ConversationService:
     return ConversationService(

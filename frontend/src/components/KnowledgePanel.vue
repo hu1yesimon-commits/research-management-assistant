@@ -6,7 +6,7 @@
         <p>Grounded answer and evidence from already embedded local knowledge chunks.</p>
       </div>
       <span class="badge" :class="knowledge.enabled ? 'badge--active' : 'badge--muted'">
-        {{ knowledge.enabled ? "Enabled" : "Disabled" }}
+        {{ knowledge.enabled ? "Enabled" : "Not run" }}
       </span>
     </div>
 
@@ -19,7 +19,10 @@
         <h3>Answer</h3>
         <span v-if="knowledge.mode" class="meta">mode: {{ knowledge.mode }}</span>
       </div>
-      <p v-if="knowledge.answer" class="answer-block">{{ knowledge.answer }}</p>
+      <template v-if="!knowledge.enabled">
+        <p class="empty-state">Ask about saved papers after embedding a PDF.</p>
+      </template>
+      <p v-else-if="knowledge.answer" class="answer-block">{{ knowledge.answer }}</p>
       <p v-else class="empty-state">No knowledge answer yet.</p>
     </div>
 
@@ -43,7 +46,8 @@
         </li>
       </ul>
 
-      <p v-else class="empty-state">No knowledge sources returned.</p>
+      <p v-else-if="!knowledge.enabled" class="empty-state">Knowledge QA has not run for this turn yet.</p>
+      <p v-else class="empty-state">No matching embedded chunks returned.</p>
     </div>
   </section>
 </template>

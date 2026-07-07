@@ -163,7 +163,7 @@ const candidateActionHint = ref("");
 const apiBaseUrl = API_BASE_URL;
 
 const defaultKnowledgeSection = {
-  enabled: true,
+  enabled: false,
   answer: null,
   sources: [],
   error: null,

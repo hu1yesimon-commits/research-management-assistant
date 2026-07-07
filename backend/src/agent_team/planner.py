@@ -1,6 +1,7 @@
 """Bounded Leader planning and user-facing response generation."""
 
 import json
+import logging
 import re
 from typing import Protocol
 
@@ -12,6 +13,8 @@ from agent_team.contracts import (
 )
 from agent_team.prompts import FEW_SHOT_CASES, LEADER_SYSTEM_PROMPT
 from agent_team.research_routing import ResearchRoutingParser
+
+logger = logging.getLogger(__name__)
 
 
 class LeaderPlanner(Protocol):
@@ -122,6 +125,72 @@ class LeaderPromptBuilder:
         }
         messages.append(("user", json.dumps(current_input, ensure_ascii=False)))
         return messages
+
+
+class LeaderResponsePromptBuilder:
+    """Render typed execution results into a bounded user-facing prompt."""
+
+    SYSTEM_PROMPT = (
+        "You are the user-facing research team leader.\n"
+        "Use only typed agent results supplied below.\n"
+        "Do not invent papers, scores, citations, source text, or saved knowledge.\n"
+        "If research completed, summarize count and point the user to Active Candidates.\n"
+        "If knowledge completed with sources, answer in a concise grounded way.\n"
+        "If knowledge has no sources, say local evidence was not found and suggest search or upload/embed.\n"
+        "If a step failed, explain what happened and give the next practical action.\n"
+        "Keep the answer under 120 words."
+    )
+
+    def build(
+        self,
+        planner_input: PlannerInput,
+        plan: LeaderPlan,
+        results: list[AgentResult],
+    ) -> list[tuple[str, str]]:
+        payload = {
+            "message": planner_input.message,
+            "plan": plan.model_dump(mode="json"),
+            "results": [self._serialize_result(result) for result in results],
+        }
+        return [
+            ("system", self.SYSTEM_PROMPT),
+            ("user", json.dumps(payload, ensure_ascii=False)),
+        ]
+
+    @staticmethod
+    def _serialize_result(result: AgentResult) -> dict:
+        serialized = {
+            "agent_name": result.agent_name,
+            "action": result.action,
+            "status": result.status,
+            "errors": [error.model_dump(mode="json") for error in result.errors],
+        }
+        if result.knowledge is not None:
+            serialized["knowledge"] = {
+                "enabled": result.knowledge.enabled,
+                "answer": result.knowledge.answer,
+                "mode": result.knowledge.mode,
+                "error": result.knowledge.error,
+                "source_count": len(result.knowledge.sources),
+                "source_titles": [
+                    source.title for source in result.knowledge.sources[:3] if source.title
+                ],
+            }
+        if result.research is not None:
+            serialized["research"] = {
+                "enabled": result.research.enabled,
+                "returned_count": result.research.returned_count,
+                "requested_top_k": result.research.requested_top_k,
+                "error": result.research.error,
+            }
+        if result.idea is not None:
+            serialized["idea"] = {
+                "enabled": result.idea.enabled,
+                "idea_count": len(result.idea.ideas),
+                "idea_titles": [idea.title for idea in result.idea.ideas[:3]],
+                "error": result.idea.error,
+            }
+        return serialized
 
 
 class StructuredLLMLeaderPlanner:
@@ -333,3 +402,41 @@ class DeterministicLeaderResponder:
                 lines.append(f"- {idea.title}: {idea.next_small_experiment}")
             return lines
         return []
+
+
+class LLMLeaderResponder:
+    """LLM-backed response rendering with deterministic fallback."""
+
+    def __init__(
+        self,
+        chat_model,
+        fallback: LeaderResponder | None = None,
+        prompt_builder: LeaderResponsePromptBuilder | None = None,
+        enabled: bool = True,
+    ) -> None:
+        self.chat_model = chat_model
+        self.fallback = fallback or DeterministicLeaderResponder()
+        self.prompt_builder = prompt_builder or LeaderResponsePromptBuilder()
+        self.enabled = enabled
+
+    def respond(
+        self,
+        planner_input: PlannerInput,
+        plan: LeaderPlan,
+        results: list[AgentResult],
+    ) -> str:
+        if not self.enabled or self.chat_model is None:
+            logger.warning("leader response provider unavailable; falling back to deterministic responder")
+            return self.fallback.respond(planner_input, plan, results)
+        prompt = self.prompt_builder.build(planner_input, plan, results)
+        try:
+            response = self.chat_model.invoke(prompt)
+        except Exception:
+            logger.exception("leader response provider failed; falling back to deterministic responder")
+            return self.fallback.respond(planner_input, plan, results)
+
+        content = getattr(response, "content", response)
+        text = content.strip() if isinstance(content, str) else str(content).strip()
+        if not text:
+            logger.warning("leader response provider returned empty content; falling back to deterministic responder")
+        return text or self.fallback.respond(planner_input, plan, results)

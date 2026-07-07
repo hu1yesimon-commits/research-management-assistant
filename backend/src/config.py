@@ -49,6 +49,9 @@ class Config:
     leader_provider: str = "deterministic"
     leader_model: str = "deepseek-chat"
     leader_temperature: float = 0.0
+    leader_response_provider: str = "deepseek"
+    leader_response_model: str = "deepseek-chat"
+    leader_response_temperature: float = 0.2
     summary_provider: str = "deterministic"
     agent_step_timeout_seconds: float = 120.0
     turn_timeout_seconds: float = 240.0
@@ -60,6 +63,7 @@ class Config:
 
     def __post_init__(self):
         self.leader_provider = validate_provider_name(self.leader_provider)
+        self.leader_response_provider = validate_provider_name(self.leader_response_provider)
         self.summary_provider = validate_provider_name(self.summary_provider)
 
 config = Config(
@@ -93,6 +97,9 @@ config = Config(
     leader_provider=os.getenv("LEADER_PROVIDER", "deterministic"),
     leader_model=os.getenv("LEADER_MODEL", "deepseek-chat"),
     leader_temperature=float(os.getenv("LEADER_TEMPERATURE", "0")),
+    leader_response_provider=os.getenv("LEADER_RESPONSE_PROVIDER", "deepseek"),
+    leader_response_model=os.getenv("LEADER_RESPONSE_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
+    leader_response_temperature=float(os.getenv("LEADER_RESPONSE_TEMPERATURE", "0.2")),
     summary_provider=os.getenv("SUMMARY_PROVIDER", "deterministic"),
     agent_step_timeout_seconds=float(os.getenv("AGENT_STEP_TIMEOUT_SECONDS", "120")),
     turn_timeout_seconds=float(os.getenv("TURN_TIMEOUT_SECONDS", "240")),

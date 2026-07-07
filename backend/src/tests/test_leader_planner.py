@@ -14,6 +14,8 @@ from agent_team.providers import validate_provider_name
 from agent_team.planner import (
     DeterministicLeaderPlanner,
     DeterministicLeaderResponder,
+    LLMLeaderResponder,
+    LeaderResponsePromptBuilder,
     LeaderPromptBuilder,
     StructuredLLMLeaderPlanner,
 )
@@ -730,6 +732,148 @@ def test_deterministic_responder_handles_no_result_direct_and_clarify(message, e
     assert expected in response
 
 
+class RecordingResponderChatModel:
+    def __init__(self, content=" concise response ", error: Exception | None = None):
+        self.content = content
+        self.error = error
+        self.prompts = []
+
+    def invoke(self, prompt):
+        self.prompts.append(prompt)
+        if self.error is not None:
+            raise self.error
+        return type("Response", (), {"content": self.content})()
+
+
+def test_leader_response_prompt_builder_minimizes_typed_payloads():
+    planner_input = make_input(
+        "Find papers then propose ideas", experiment_log=make_log()
+    )
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+    results = [
+        AgentResult(
+            agent_name="knowledge",
+            action="answer",
+            status="completed",
+            knowledge=KnowledgeResult(
+                enabled=True,
+                answer="Saved evidence supports residual connections.",
+                mode="grounded",
+                sources=[
+                    {
+                        "paper_id": "paper-1",
+                        "title": "Graph Reconstruction",
+                        "chunk_index": 0,
+                        "distance": 0.12,
+                        "text": "LONG_SOURCE_TEXT_SHOULD_NOT_APPEAR",
+                        "vector_ref": "chroma:research_chunks:paper-1:0:hash-a",
+                    }
+                ],
+            ),
+        ),
+        AgentResult(
+            agent_name="research",
+            action="recommend_papers",
+            status="completed",
+            research=ResearchResult(
+                requested_top_k=5,
+                returned_count=1,
+                batch_id="batch-1",
+                top_k=[
+                    {
+                        "paper": {
+                            "paper_id": "paper-1",
+                            "title": "Graph Reconstruction",
+                            "abstract": "LONG_ABSTRACT_SHOULD_NOT_APPEAR",
+                        }
+                    }
+                ],
+            ),
+        ),
+    ]
+
+    prompt = LeaderResponsePromptBuilder().build(planner_input, plan, results)
+    prompt_text = json.dumps(prompt, ensure_ascii=False)
+
+    assert "Saved evidence supports residual connections." in prompt_text
+    assert "returned_count" in prompt_text
+    assert "LONG_SOURCE_TEXT_SHOULD_NOT_APPEAR" not in prompt_text
+    assert "LONG_ABSTRACT_SHOULD_NOT_APPEAR" not in prompt_text
+    assert "vector_ref" not in prompt_text
+    assert "\"top_k\": [{" not in prompt_text
+
+
+def test_llm_leader_responder_returns_trimmed_content_and_uses_minimized_prompt():
+    planner_input = make_input(
+        "Find papers then propose ideas", experiment_log=make_log()
+    )
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+    results = [
+        AgentResult(
+            agent_name="research",
+            action="recommend_papers",
+            status="completed",
+            research=ResearchResult(
+                requested_top_k=5,
+                returned_count=1,
+                top_k=[
+                    {
+                        "paper": {
+                            "paper_id": "paper-1",
+                            "abstract": "LONG_ABSTRACT_SHOULD_NOT_APPEAR",
+                        }
+                    }
+                ],
+            ),
+        )
+    ]
+    chat_model = RecordingResponderChatModel()
+
+    response = LLMLeaderResponder(chat_model=chat_model).respond(
+        planner_input, plan, results
+    )
+
+    prompt_text = json.dumps(chat_model.prompts[0], ensure_ascii=False)
+    assert response == "concise response"
+    assert "LONG_ABSTRACT_SHOULD_NOT_APPEAR" not in prompt_text
+    assert "paper-1" not in prompt_text
+
+
+def test_llm_leader_responder_falls_back_without_enabled_provider():
+    planner_input = make_input("What can this research workbench do?")
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+    fallback = DeterministicLeaderResponder()
+
+    response = LLMLeaderResponder(
+        chat_model=None,
+        fallback=fallback,
+        enabled=False,
+    ).respond(planner_input, plan, [])
+
+    assert response == fallback.respond(planner_input, plan, [])
+
+
+def test_llm_leader_responder_falls_back_on_invoke_error():
+    planner_input = make_input("Find recent papers")
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+    results = [
+        AgentResult(
+            agent_name="research",
+            action="recommend_papers",
+            status="completed",
+            research=ResearchResult(requested_top_k=5, returned_count=0),
+        )
+    ]
+    fallback = DeterministicLeaderResponder()
+
+    response = LLMLeaderResponder(
+        chat_model=RecordingResponderChatModel(error=RuntimeError("offline")),
+        fallback=fallback,
+    ).respond(planner_input, plan, results)
+
+    assert response == fallback.respond(planner_input, plan, results)
+
+
 def test_provider_name_validation_is_explicit_and_never_falls_back():
     for provider in ("deterministic", "openai", "deepseek"):
         assert validate_provider_name(provider) == provider
@@ -743,10 +887,13 @@ class RecordingChatModel:
 
 
 def test_provider_factories_keep_deterministic_defaults_offline():
-    configured = Config()
+    configured = Config(leader_response_provider="deterministic")
 
     assert isinstance(
         providers.build_leader_planner(configured), DeterministicLeaderPlanner
+    )
+    assert isinstance(
+        providers.build_leader_responder(configured), DeterministicLeaderResponder
     )
     assert isinstance(
         providers.build_summary_generator(configured), DeterministicSummaryGenerator
@@ -757,9 +904,12 @@ def test_provider_factories_keep_deterministic_defaults_offline():
 def test_provider_factories_construct_permitted_real_leader_and_summary(provider):
     configured = Config(
         leader_provider=provider,
+        leader_response_provider=provider,
         summary_provider=provider,
         leader_model="leader-test-model",
         leader_temperature=0.25,
+        leader_response_model="leader-response-test-model",
+        leader_response_temperature=0.2,
         deepseek_api_key="test-key",
         deepseek_base_url="https://deepseek.invalid/v1",
     )
@@ -767,27 +917,39 @@ def test_provider_factories_construct_permitted_real_leader_and_summary(provider
     leader = providers.build_leader_planner(
         configured, chat_model_cls=RecordingChatModel
     )
+    responder = providers.build_leader_responder(
+        configured, chat_model_cls=RecordingChatModel
+    )
     summary = providers.build_summary_generator(
         configured, chat_model_cls=RecordingChatModel
     )
 
     assert isinstance(leader, StructuredLLMLeaderPlanner)
+    assert isinstance(responder, LLMLeaderResponder)
     assert isinstance(summary, LLMSummaryGenerator)
     assert leader.chat_model.kwargs["model"] == "leader-test-model"
     assert leader.chat_model.kwargs["temperature"] == 0.25
-    assert summary.chat_model.kwargs == leader.chat_model.kwargs
+    assert responder.chat_model.kwargs["model"] == "leader-response-test-model"
+    assert responder.chat_model.kwargs["temperature"] == 0.2
+    assert summary.chat_model.kwargs["model"] == "leader-test-model"
+    assert summary.chat_model.kwargs["temperature"] == 0.25
     if provider == "deepseek":
         assert leader.chat_model.kwargs["api_key"] == "test-key"
         assert leader.chat_model.kwargs["base_url"] == "https://deepseek.invalid/v1"
+        assert responder.chat_model.kwargs["api_key"] == "test-key"
+        assert responder.chat_model.kwargs["base_url"] == "https://deepseek.invalid/v1"
     else:
         assert "api_key" not in leader.chat_model.kwargs
         assert "base_url" not in leader.chat_model.kwargs
+        assert "api_key" not in responder.chat_model.kwargs
+        assert "base_url" not in responder.chat_model.kwargs
 
 
 @pytest.mark.parametrize(
     ("factory_name", "field"),
     [
         ("build_leader_planner", "leader_provider"),
+        ("build_leader_responder", "leader_response_provider"),
         ("build_summary_generator", "summary_provider"),
     ],
 )
@@ -803,18 +965,37 @@ def test_provider_factories_reject_unknown_names_at_construction(factory_name, f
 
 @pytest.mark.parametrize(
     ("field", "provider"),
-    [("leader_provider", "unknown"), ("summary_provider", "bogus")],
+    [
+        ("leader_provider", "unknown"),
+        ("leader_response_provider", "unknown"),
+        ("summary_provider", "bogus"),
+    ],
 )
 def test_config_rejects_unknown_agent_team_providers(field, provider):
     with pytest.raises(ValueError, match="Unsupported provider"):
         Config(**{field: provider})
 
 
+def test_config_accepts_independent_leader_response_provider():
+    configured = Config(leader_response_provider="deepseek")
+
+    assert configured.leader_response_provider == "deepseek"
+    assert configured.leader_provider == "deterministic"
+
+
+def test_config_rejects_unknown_leader_response_provider():
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        Config(leader_response_provider="unknown")
+
+
 def test_agent_team_config_defaults_are_bounded_and_offline():
     configured = Config()
 
     assert configured.leader_provider == "deterministic"
+    assert configured.leader_response_provider == "deepseek"
     assert configured.leader_model == "deepseek-chat"
+    assert configured.leader_response_model == "deepseek-chat"
+    assert configured.leader_response_temperature == 0.2
     assert configured.leader_temperature == 0.0
     assert configured.summary_provider == "deterministic"
     assert configured.agent_step_timeout_seconds == 120.0

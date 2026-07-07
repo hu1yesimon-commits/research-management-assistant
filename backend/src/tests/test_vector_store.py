@@ -109,6 +109,18 @@ def test_get_vector_store_service_switches_between_fake_and_chroma(tmp_path):
         config.chroma_collection_name = original_collection_name
 
 
+def test_demo_retrieval_environment_uses_persistent_vector_stack():
+    configured = config.__class__(
+        vector_backend="chroma",
+        embedding_provider="bge-m3",
+        chroma_persist_dir="backend/data/vector_store/chroma",
+    )
+
+    assert configured.vector_backend == "chroma"
+    assert configured.embedding_provider == "bge-m3"
+    assert configured.chroma_persist_dir.endswith("chroma")
+
+
 def test_get_vector_store_service_reuses_chroma_instance_for_same_config(tmp_path):
     original_backend = config.vector_backend
     original_persist_dir = config.chroma_persist_dir

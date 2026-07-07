@@ -263,6 +263,16 @@ describe("ResearchWorkbench", () => {
     expect(text).not.toContain("Legacy query discovery paper");
   });
 
+  test("keeps Idea Assistant as a separate structured log workflow", async () => {
+    const wrapper = mount(ResearchWorkbench);
+    await flushPromises();
+
+    await wrapper.find("button.legacy-tools__toggle").trigger("click");
+
+    expect(wrapper.text()).toContain("Idea Assistant");
+    expect(wrapper.text()).toContain("Structured experiment logs");
+  });
+
   test("keeps lifecycle collapsed until the user opens it", async () => {
     getSavedPapers.mockResolvedValueOnce([
       {
