@@ -655,6 +655,13 @@ def test_logs_endpoint_saves_and_lists_logs(tmp_path):
     app.dependency_overrides.clear()
 
 
+def test_legacy_candidate_endpoints_are_marked_deprecated_without_behavior_change():
+    schema = app.openapi()
+
+    assert schema["paths"]["/papers/candidates"]["get"]["deprecated"] is True
+    assert schema["paths"]["/papers/{paper_id}/accept"]["post"]["deprecated"] is True
+
+
 def experiment_log_payload():
     return {
         "task": "defect classification",
