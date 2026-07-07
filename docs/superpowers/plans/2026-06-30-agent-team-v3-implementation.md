@@ -1254,7 +1254,7 @@ git commit -m "feat: add bounded leader planner"
 - Create: `backend/src/tests/test_agent_dispatcher.py`
 - Modify: `backend/src/tests/test_idea_service.py`
 
-- [ ] **Step 1: Write failing Research Agent tests**
+- [x] **Step 1: Write failing Research Agent tests**
 
 ```python
 def test_research_agent_filters_saved_and_recent_expired_candidates(fake_graph, candidate_service):
@@ -1273,7 +1273,7 @@ def test_research_agent_filters_saved_and_recent_expired_candidates(fake_graph, 
     assert result.research.returned_count == 1
 ```
 
-- [ ] **Step 2: Implement ResearchAgent**
+- [x] **Step 2: Implement ResearchAgent**
 
 Invoke the V1 Discovery Subgraph with an authoritative snapshot:
 
@@ -1303,7 +1303,7 @@ batch = self.candidate_service.create_batch(session_id, turn_id, query, fresh) i
 
 Return typed counts, rewritten queries, judge failures, Candidate Batch ID, and the fresh top results. Catch only typed `DiscoveryStageError`; unknown programming errors must propagate.
 
-- [ ] **Step 3: Write failing Idea Agent evidence tests**
+- [x] **Step 3: Write failing Idea Agent evidence tests**
 
 ```python
 def test_idea_agent_uses_research_evidence_without_running_discovery(fake_idea_service, experiment_log):
@@ -1321,7 +1321,7 @@ def test_idea_agent_uses_research_evidence_without_running_discovery(fake_idea_s
     assert result.idea.enabled is True
 ```
 
-- [ ] **Step 4: Separate Idea generation from fresh discovery ownership**
+- [x] **Step 4: Separate Idea generation from fresh discovery ownership**
 
 Add `discovery_candidates: list[dict] | None = None` to `IdeaRecommendationService.recommend()`. Apply this precedence:
 
@@ -1333,7 +1333,7 @@ if discovery_candidates is None and include_discovery and self.discovery_graph i
 
 The new Idea Agent always passes a list and `include_discovery=False`. The legacy `/ideas/recommend` path keeps its current optional discovery behavior during compatibility migration.
 
-- [ ] **Step 5: Verify adapters and legacy Idea behavior**
+- [x] **Step 5: Verify adapters and legacy Idea behavior**
 
 ```bash
 PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_agent_dispatcher.py backend/src/tests/test_idea_service.py backend/src/tests/test_paper_discovery_graph.py -q
@@ -1341,7 +1341,7 @@ PYTHONPATH=backend/src ./.venv/bin/python -m pytest backend/src/tests/test_agent
 
 Expected: PASS; Research alone creates Candidate Batch, Idea never creates one, and the legacy Idea endpoint still supports its flag.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/agent_team/research_agent.py backend/src/agent_team/idea_agent.py backend/src/services/idea_service.py backend/src/tests/test_agent_dispatcher.py backend/src/tests/test_idea_service.py
@@ -2287,4 +2287,15 @@ Verification commands and results: focused Task 7 pytest passed with 82 tests; c
 Contract decisions made: Leader plans remain typed and bounded to six plan types, three Agents, and three Actions; deterministic providers remain offline defaults; only deterministic, OpenAI, and DeepSeek provider construction is allowed; successful Leader responses render typed knowledge, research, and idea payloads without inventing evidence; ResearchRoutingSignal remains private and review_existing never triggers fresh discovery
 Known failures or blockers: Execution Log had lagged behind the code through the Task 7 commit chain; closeout review found missing provider factories and successful-payload rendering, both fixed by 439fc1a with offline regression tests
 Next unblocked wave: Wave 6, GPT-5.4 medium, Task 8
+```
+
+```text
+Wave: 6
+Owner model: GPT-5.4 medium for Task 8 adapters, with independent ownership-boundary review
+Completed task commits: 338ad0b
+Current worktree and branch: /Users/nuonuohu/Developer/graphReconstruction/.worktrees/agent-team-v3; codex/agent-team-v3
+Verification commands and results: exact Task 8 pytest passed with 19 tests; Ruff passed on all Task 8 files; git diff --check passed; independent task review approved with no findings
+Contract decisions made: Research exclusively owns fresh Discovery, fresh filtering, and Candidate Batch creation; Idea always consumes an explicit evidence list with include_discovery=False; legacy Idea discovery remains available only when discovery_candidates is None and include_discovery=True; judge failures remain typed AgentResult errors because frozen ResearchResult has no judge-failure field
+Known failures or blockers: initial Task 8 subagent dispatch hit model capacity and was retried without code changes; no implementation blockers remain
+Next unblocked wave: Wave 7, GPT-5.5 high, Task 9
 ```
