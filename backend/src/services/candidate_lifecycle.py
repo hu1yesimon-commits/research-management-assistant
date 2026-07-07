@@ -28,7 +28,9 @@ class CandidateNotFoundError(LookupError):
         super().__init__(f"candidate not found: {candidate_id}")
 
 
-def paper_key(paper: dict) -> str:
+def paper_key(paper: dict | PaperMetadata) -> str:
+    if isinstance(paper, PaperMetadata):
+        paper = paper.model_dump()
     raw_doi = paper.get("doi") or (paper.get("source_ids") or {}).get("doi")
     if raw_doi:
         normalized = raw_doi.strip().lower()
@@ -394,13 +396,19 @@ class CandidateLifecycleService:
     @staticmethod
     def _paper_payload(candidate: dict) -> dict:
         paper = candidate.get("paper")
-        if isinstance(paper, dict) and "paper_id" in paper:
+        if isinstance(paper, PaperMetadata):
+            return paper.model_dump()
+        if isinstance(paper, dict):
             return paper
+        if isinstance(candidate, PaperMetadata):
+            return candidate.model_dump()
         return candidate
 
     @staticmethod
     def _judgement_payload(candidate: dict) -> dict | None:
         judgement = candidate.get("judgement")
+        if isinstance(judgement, JudgeResult):
+            return judgement.model_dump()
         return judgement if isinstance(judgement, dict) else None
 
     @staticmethod

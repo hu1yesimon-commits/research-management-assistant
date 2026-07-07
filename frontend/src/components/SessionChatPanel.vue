@@ -69,6 +69,7 @@ const draft = ref("");
 const error = ref("");
 const isBusy = ref(false);
 const retryState = ref(null);
+const visibleMessageLimit = 5;
 
 const displayMessages = computed(() =>
   props.messages
@@ -78,7 +79,8 @@ const displayMessages = computed(() =>
       role: message.role,
       text: message.content?.text || message.content?.assistant_message || "",
     }))
-    .filter((message) => message.text),
+    .filter((message) => message.text)
+    .slice(-visibleMessageLimit),
 );
 
 const isSubmitDisabled = computed(() => isBusy.value || !draft.value);

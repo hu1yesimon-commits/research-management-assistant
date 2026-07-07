@@ -38,28 +38,41 @@ def _bounded_plan(
         "direct_reply": [],
         "clarify": [],
         "knowledge_qa": [
-            PlanStep(id="knowledge-1", agent="knowledge", action="answer")
+            PlanStep(
+                id="knowledge-1",
+                agent="knowledge",
+                action="answer",
+                input={"question": goal, "top_k": 5},
+            )
         ],
         "research": [
             PlanStep(
                 id="research-1",
                 agent="research",
                 action="recommend_papers",
+                input={"query": goal, "top_k": 5},
             )
         ],
         "idea": [
-            PlanStep(id="idea-1", agent="idea", action="generate_ideas")
+            PlanStep(
+                id="idea-1",
+                agent="idea",
+                action="generate_ideas",
+                input={"idea_count": 3},
+            )
         ],
         "research_then_idea": [
             PlanStep(
                 id="research-1",
                 agent="research",
                 action="recommend_papers",
+                input={"query": goal, "top_k": 5},
             ),
             PlanStep(
                 id="idea-1",
                 agent="idea",
                 action="generate_ideas",
+                input={"idea_count": 3},
                 depends_on=["research-1"],
             ),
         ],
@@ -207,6 +220,9 @@ class DeterministicLeaderPlanner:
                 "Which experiment, paper, or metric do you want to improve?",
             )
 
+        if planner_input.has_knowledge:
+            return _bounded_plan("knowledge_qa", message)
+
         return _bounded_plan(
             "clarify",
             message or "Clarify the research request",
@@ -268,20 +284,11 @@ class DeterministicLeaderResponder:
         lines = []
         reported_errors: set[str] = set()
         for result in results:
-            lines.append(
-                f"{result.agent_name} {result.action}: {result.status}"
-            )
+            line = self._result_summary(result)
+            if line:
+                lines.append(line)
             if result.status == "completed":
-                for label, payload in (
-                    ("knowledge", result.knowledge),
-                    ("research", result.research),
-                    ("idea", result.idea),
-                ):
-                    if payload is not None:
-                        lines.append(
-                            f"{label}: "
-                            f"{json.dumps(payload.model_dump(exclude_none=True), ensure_ascii=False)}"
-                        )
+                lines.extend(self._payload_summaries(result))
             error_messages = [error.message for error in result.errors]
             for payload in (result.knowledge, result.research, result.idea):
                 if payload is not None and payload.error:
@@ -291,3 +298,38 @@ class DeterministicLeaderResponder:
                     reported_errors.add(error_message)
                     lines.append(f"error: {error_message}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _result_summary(result: AgentResult) -> str:
+        if result.status == "skipped":
+            return f"{result.agent_name} {result.action}: skipped"
+        if result.status == "failed":
+            return f"{result.agent_name} {result.action}: failed"
+        if result.research is not None:
+            count = result.research.returned_count
+            noun = "paper" if count == 1 else "papers"
+            return f"Found {count} candidate {noun}."
+        if result.knowledge is not None:
+            return "Answered from saved knowledge."
+        if result.idea is not None:
+            count = len(result.idea.ideas)
+            noun = "idea" if count == 1 else "ideas"
+            return f"Generated {count} research {noun}."
+        return f"{result.agent_name} {result.action}: completed"
+
+    @staticmethod
+    def _payload_summaries(result: AgentResult) -> list[str]:
+        if result.research is not None:
+            count = result.research.returned_count
+            if count == 0:
+                return ["No fresh candidate papers were returned for this search."]
+            pronoun = "it" if count == 1 else "them"
+            return [f"Review {pronoun} in Active Candidates and accept the papers worth saving."]
+        if result.knowledge is not None and result.knowledge.answer:
+            return [result.knowledge.answer]
+        if result.idea is not None:
+            lines: list[str] = []
+            for idea in result.idea.ideas[:3]:
+                lines.append(f"- {idea.title}: {idea.next_small_experiment}")
+            return lines
+        return []

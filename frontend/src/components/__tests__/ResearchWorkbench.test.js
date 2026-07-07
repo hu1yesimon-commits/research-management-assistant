@@ -245,7 +245,7 @@ describe("ResearchWorkbench", () => {
   });
 
   test("keeps legacy query tools behind a collapsed panel and can still run them", async () => {
-    researchQuery.mockRejectedValueOnce(new Error("query fallback failed"));
+    researchQuery.mockResolvedValueOnce(queryResponse);
     const wrapper = mount(ResearchWorkbench);
     await flushPromises();
 
@@ -259,7 +259,8 @@ describe("ResearchWorkbench", () => {
     await flushPromises();
 
     const text = wrapper.text();
-    expect(text).toContain("query fallback failed");
+    expect(text).toContain("Legacy query knowledge answer");
+    expect(text).not.toContain("Legacy query discovery paper");
   });
 
   test("keeps lifecycle collapsed until the user opens it", async () => {

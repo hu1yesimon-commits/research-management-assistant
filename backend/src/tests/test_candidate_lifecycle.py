@@ -44,6 +44,13 @@ def make_candidate(paper_id: str, doi: str | None = None) -> dict:
     }
 
 
+def make_model_candidate(paper_id: str, doi: str | None = None) -> dict:
+    return {
+        "paper": make_paper(paper_id, doi),
+        "judgement": make_judgement(),
+    }
+
+
 @pytest.fixture
 def database_path(tmp_path):
     return tmp_path / "memory.sqlite3"
@@ -183,3 +190,16 @@ def test_filter_fresh_underfills_instead_of_refilling_suppressed_candidates(
         "doi:10.1000/fresh-1",
         "doi:10.1000/fresh-2",
     ]
+
+
+def test_filter_and_create_batch_accept_graph_model_candidates(
+    session_store, candidate_service
+):
+    turn = session_store.start_turn("default", "model-candidate", {"text": "search"})
+    ranked = [make_model_candidate("model-paper", "10.1000/model-paper")]
+
+    fresh = candidate_service.filter_fresh("default", ranked, top_k=5)
+    batch = candidate_service.create_batch("default", turn.turn_id, "search", fresh)
+
+    assert batch.candidates[0].paper_snapshot.paper_id == "model-paper"
+    assert batch.candidates[0].paper_key == "doi:10.1000/model-paper"

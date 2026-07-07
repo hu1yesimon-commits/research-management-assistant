@@ -42,11 +42,6 @@
     </section>
     <section class="workspace-grid">
       <KnowledgePanel :knowledge="knowledgeSection" />
-      <DiscoveryPanel
-        :discovery="discoverySection"
-        :action-states="candidateActionStates"
-        @accept="handleDiscoveryAccept"
-      />
     </section>
 
     <section :class="['panel', 'panel--full', !isLegacyToolsOpen && 'panel--collapsed']">
@@ -137,7 +132,6 @@ import {
 import ActiveCandidatesPanel from "./ActiveCandidatesPanel.vue";
 import AgentTracePanel from "./AgentTracePanel.vue";
 import CandidateLifecyclePanel from "./CandidateLifecyclePanel.vue";
-import DiscoveryPanel from "./DiscoveryPanel.vue";
 import KnowledgePanel from "./KnowledgePanel.vue";
 import MemorySummaryCard from "./MemorySummaryCard.vue";
 import QueryForm from "./QueryForm.vue";
@@ -168,12 +162,6 @@ const candidateActionHint = ref("");
 
 const apiBaseUrl = API_BASE_URL;
 
-const defaultDiscoverySection = {
-  enabled: true,
-  candidates: [],
-  error: null,
-};
-
 const defaultKnowledgeSection = {
   enabled: true,
   answer: null,
@@ -181,12 +169,6 @@ const defaultKnowledgeSection = {
   error: null,
   mode: null,
 };
-
-const discoverySection = computed(() =>
-  activeResultSource.value === "query"
-    ? queryResponse.value?.discovery || defaultDiscoverySection
-    : defaultDiscoverySection,
-);
 
 const knowledgeSection = computed(() => {
   if (activeResultSource.value === "session") {
@@ -196,7 +178,7 @@ const knowledgeSection = computed(() => {
 });
 
 const hasPartialFailure = computed(() => {
-  return Boolean(discoverySection.value.error || knowledgeSection.value.error);
+  return Boolean(knowledgeSection.value.error);
 });
 
 const healthLabel = computed(() => {
@@ -340,22 +322,6 @@ async function handleAccept(paperId) {
     const result = await acceptPaper(paperId);
     candidateActionHint.value = "";
     return `Accepted: ${result.status}`;
-  });
-}
-
-async function handleDiscoveryAccept(candidate) {
-  const paperId = candidate?.paper?.paper_id;
-  if (!paperId || !candidate?.paper) {
-    return;
-  }
-
-  await runCandidateAction(paperId, async () => {
-    const result = await acceptPaper(paperId, {
-      paper: candidate.paper,
-      judgement: candidate.judgement || null,
-    });
-    candidateActionHint.value = "Paper saved. Open Saved Candidates to upload the PDF and continue embedding.";
-    return `Saved and accepted: ${result.status}`;
   });
 }
 

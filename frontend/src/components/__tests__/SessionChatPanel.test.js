@@ -34,6 +34,27 @@ describe("SessionChatPanel", () => {
     expect(wrapper.text()).not.toContain("internal trace");
   });
 
+  test("shows only the five most recent chat messages", () => {
+    const wrapper = mount(SessionChatPanel, {
+      props: {
+        messages: [
+          { id: 1, role: "user", content: { text: "Message 1" } },
+          { id: 2, role: "assistant", content: { assistant_message: "Message 2" } },
+          { id: 3, role: "user", content: { text: "Message 3" } },
+          { id: 4, role: "assistant", content: { assistant_message: "Message 4" } },
+          { id: 5, role: "user", content: { text: "Message 5" } },
+          { id: 6, role: "assistant", content: { assistant_message: "Message 6" } },
+        ],
+        runTurn: vi.fn(),
+      },
+    });
+
+    expect(wrapper.text()).not.toContain("Message 1");
+    expect(wrapper.text()).toContain("Message 2");
+    expect(wrapper.text()).toContain("Message 6");
+    expect(wrapper.findAll(".chat-message")).toHaveLength(5);
+  });
+
   test("reuses the same idempotency key when retrying the same failed draft", async () => {
     const runTurn = vi
       .fn()

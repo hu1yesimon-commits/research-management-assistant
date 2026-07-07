@@ -177,6 +177,20 @@ def test_deterministic_planner_emits_exact_bounded_steps_and_dependencies():
         ] == expected
 
 
+def test_deterministic_planner_preserves_user_request_in_professional_step_inputs():
+    planner = DeterministicLeaderPlanner()
+
+    research = planner.plan(make_input("Find recent papers about graph reconstruction"))
+    knowledge = planner.plan(make_input("Explain saved evidence", has_knowledge=True))
+    research_then_idea = planner.plan(
+        make_input("Find recent papers then propose ideas", experiment_log=make_log())
+    )
+
+    assert research.steps[0].input["query"] == "Find recent papers about graph reconstruction"
+    assert knowledge.steps[0].input["question"] == "Explain saved evidence"
+    assert research_then_idea.steps[0].input["query"] == "Find recent papers then propose ideas"
+
+
 EXPECTED_FEW_SHOT_CASES = [
     {
         "message": "Find recent papers about graph reconstruction",
@@ -235,6 +249,7 @@ def test_prompt_constants_preserve_exact_system_rules_and_few_shot_labels():
     assert LEADER_SYSTEM_PROMPT == """You are the only user-facing research team leader.
 Choose exactly one bounded plan type.
 Use research only for fresh paper discovery.
+When current knowledge is available, prefer knowledge_qa unless the user asks for fresh search.
 Use idea when an experiment log exists and current knowledge is sufficient.
 Use research_then_idea when fresh literature is required before idea generation.
 Never accept papers, create agents, or invent actions.
@@ -276,6 +291,27 @@ def test_deterministic_planner_prioritizes_explicit_research_without_substring_c
     )
 
     assert plan.plan_type == "research"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "What does this paper say about graph reconstruction?",
+        "Explain the method in the paper",
+        "How does the uploaded paper solve this?",
+        "Compare the saved papers",
+        "Summarize the evidence we already have",
+    ],
+)
+def test_deterministic_planner_defaults_to_knowledge_qa_when_local_knowledge_exists(
+    message,
+):
+    plan = DeterministicLeaderPlanner().plan(
+        make_input(message, has_knowledge=True)
+    )
+
+    assert plan.plan_type == "knowledge_qa"
+    assert PlanValidator().validate(plan) is plan
 
 
 @pytest.mark.parametrize(
@@ -562,7 +598,8 @@ def test_deterministic_responder_reports_partial_statuses_and_errors_without_evi
         results,
     )
 
-    assert "research recommend_papers: completed" in response
+    assert "Found 0 candidate papers." in response
+    assert "No fresh candidate papers were returned for this search." in response
     assert "idea generate_ideas: skipped" in response
     assert "paper provider timed out" in response
     assert "research evidence unavailable" in response
@@ -609,7 +646,7 @@ def test_deterministic_responder_deduplicates_errors_across_agent_results():
     assert response.count(f"error: {repeated_error}") == 1
 
 
-def test_deterministic_responder_renders_successful_typed_payloads():
+def test_deterministic_responder_summarizes_successful_typed_payloads_for_chat():
     planner_input = make_input(
         "Find papers then propose ideas", experiment_log=make_log()
     )
@@ -632,7 +669,16 @@ def test_deterministic_responder_renders_successful_typed_payloads():
             research=ResearchResult(
                 requested_top_k=5,
                 returned_count=1,
-                top_k=[{"paper_id": "paper-1", "title": "Graph Reconstruction"}],
+                batch_id="batch-1",
+                top_k=[
+                    {
+                        "paper": {
+                            "paper_id": "paper-1",
+                            "title": "Graph Reconstruction",
+                            "abstract": "LONG_ABSTRACT_SHOULD_NOT_APPEAR",
+                        }
+                    }
+                ],
             ),
         ),
         AgentResult(
@@ -658,8 +704,12 @@ def test_deterministic_responder_renders_successful_typed_payloads():
     response = DeterministicLeaderResponder().respond(planner_input, plan, results)
 
     assert "Saved evidence supports residual connections." in response
-    assert "Graph Reconstruction" in response
-    assert "paper-1" in response
+    assert "Found 1 candidate paper." in response
+    assert "Review it in Active Candidates" in response
+    assert "Graph Reconstruction" not in response
+    assert "paper-1" not in response
+    assert "LONG_ABSTRACT_SHOULD_NOT_APPEAR" not in response
+    assert "top_k" not in response
     assert "Add residual decoding" in response
     assert "Run one seeded ablation." in response
 
@@ -767,5 +817,5 @@ def test_agent_team_config_defaults_are_bounded_and_offline():
     assert configured.leader_model == "deepseek-chat"
     assert configured.leader_temperature == 0.0
     assert configured.summary_provider == "deterministic"
-    assert configured.agent_step_timeout_seconds == 60.0
-    assert configured.turn_timeout_seconds == 120.0
+    assert configured.agent_step_timeout_seconds == 120.0
+    assert configured.turn_timeout_seconds == 240.0
