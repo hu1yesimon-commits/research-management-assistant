@@ -1,22 +1,31 @@
+import sqlite3
+import time
+
 import pytest
 
+from agent_team.contracts import AgentError, AgentResult, LeaderPlan, ResearchResult
+from agent_team.dispatcher import DirectAgentDispatcher
 from agent_team.idea_agent import IdeaAgent
 from agent_team.research_agent import ResearchAgent
 from graph.errors import DiscoveryStageError
 from services.candidate_lifecycle import CandidateLifecycleService
 from services.idea_service import IdeaServiceError
 from services.memory_store import MemoryStore
+from services.qa_service import QAServiceError
 from services.schemas import (
     ExperimentLogRequest,
     IdeaDiscoverySection,
     IdeaKnowledgeSection,
     IdeaOption,
     IdeaRecommendResponse,
+    IdeaResult,
     JudgeResult,
+    KnowledgeAnswerResponse,
     PaperId,
     PaperMetadata,
 )
 from services.session_store import SessionStore
+from services.session_schemas import SessionContext
 
 
 def make_candidate(paper_id: str) -> dict:
@@ -211,3 +220,239 @@ def test_idea_agent_returns_typed_service_failure():
     assert result.status == "failed"
     assert result.idea.error == "generation failed"
     assert result.errors[0].stage == "idea_generation"
+
+
+class StubResearchAgent:
+    def __init__(self, result=None, error=None, delay=0):
+        self.result = result
+        self.error = error
+        self.delay = delay
+
+    def run(self, **kwargs):
+        if self.delay:
+            time.sleep(self.delay)
+        if self.error:
+            raise self.error
+        return self.result or AgentResult(
+            agent_name="research",
+            action="recommend_papers",
+            status="completed",
+            research=ResearchResult(
+                requested_top_k=kwargs["top_k"],
+                returned_count=1,
+                top_k=[make_candidate("fresh-paper")],
+            ),
+        )
+
+
+class StubIdeaAgent:
+    def __init__(self):
+        self.received_candidates = None
+
+    def run(self, **kwargs):
+        self.received_candidates = kwargs["research_candidates"]
+        return AgentResult(
+            agent_name="idea", action="generate_ideas", status="completed",
+            idea=IdeaResult(
+                enabled=True,
+                ideas=[
+                    IdeaOption(
+                        title="Preserve thin edges",
+                        rationale="Use evidence.",
+                        expected_benefit="Higher recall",
+                        risk="False positives",
+                        suggested_validation_metric="edge recall",
+                        next_small_experiment="Run an ablation.",
+                    )
+                ],
+            ),
+        )
+
+
+@pytest.fixture
+def dispatch_store(tmp_path):
+    path = tmp_path / "dispatcher.sqlite3"
+    MemoryStore(str(path)).initialize()
+    store = SessionStore(str(path))
+    turn = store.start_turn("default", "dispatcher-request", {"text": "help"})
+    return store, turn.turn_id
+
+
+def make_context():
+    return SessionContext(
+        session_id="default",
+        agent_contexts={"research": "prior research context"},
+    )
+
+
+def research_then_idea_plan():
+    return LeaderPlan(
+        goal="research and ideate",
+        plan_type="research_then_idea",
+        steps=[
+            {"id": "research-1", "agent": "research", "action": "recommend_papers",
+             "input": {"query": "graph reconstruction", "top_k": 5}},
+            {"id": "idea-1", "agent": "idea", "action": "generate_ideas",
+             "input": {"idea_count": 3}, "depends_on": ["research-1"]},
+        ],
+    )
+
+
+def make_dispatcher(store, research_agent):
+    return DirectAgentDispatcher(
+        knowledge_service=None,
+        research_agent=research_agent,
+        idea_agent=StubIdeaAgent(),
+        session_store=store,
+        agent_step_timeout_seconds=0.05,
+    )
+
+
+class StubKnowledgeService:
+    def __init__(self, error=None):
+        self.error = error
+
+    def answer(self, **kwargs):
+        if self.error is not None:
+            raise self.error
+        return KnowledgeAnswerResponse(
+            question=kwargs["question"],
+            answer="Grounded answer",
+            sources=[],
+            mode="deterministic",
+        )
+
+
+def knowledge_plan():
+    return LeaderPlan(
+        goal="answer from knowledge",
+        plan_type="knowledge_qa",
+        steps=[
+            {
+                "id": "knowledge-1",
+                "agent": "knowledge",
+                "action": "answer",
+                "input": {"question": "What preserves thin edges?", "top_k": 4},
+            }
+        ],
+    )
+
+
+def test_research_then_idea_passes_research_output_to_idea(dispatch_store):
+    store, turn_id = dispatch_store
+    dispatcher = make_dispatcher(store, StubResearchAgent())
+
+    results = dispatcher.execute(
+        "default", turn_id, research_then_idea_plan(), make_log(), make_context()
+    )
+
+    assert [result.agent_name for result in results] == ["research", "idea"]
+    assert dispatcher.idea_agent.received_candidates == results[0].research.top_k
+    assert store.get_agent_context("default", "research").startswith(
+        "query=graph reconstruction; returned=1"
+    )
+    assert store.get_agent_context("default", "idea").startswith(
+        "experiment=graph reconstruction; ideas=Preserve thin edges"
+    )
+
+
+def test_failed_dependency_marks_idea_skipped_and_persists_terminal_runs(dispatch_store):
+    store, turn_id = dispatch_store
+    failed = AgentResult(
+        agent_name="research", action="recommend_papers", status="failed",
+        research=ResearchResult(requested_top_k=5, returned_count=0, error="offline"),
+        errors=[AgentError(agent_name="research", stage="search", message="offline")],
+    )
+    dispatcher = make_dispatcher(store, StubResearchAgent(result=failed))
+
+    results = dispatcher.execute(
+        "default", turn_id, research_then_idea_plan(), make_log(), make_context()
+    )
+
+    assert [result.status for result in results] == ["failed", "skipped"]
+    with sqlite3.connect(store.database_path) as connection:
+        rows = connection.execute(
+            "SELECT status FROM agent_runs ORDER BY started_at, rowid"
+        ).fetchall()
+    assert [row[0] for row in rows] == ["failed", "skipped"]
+
+
+def test_agent_step_timeout_becomes_typed_failure(dispatch_store):
+    store, turn_id = dispatch_store
+    dispatcher = make_dispatcher(store, StubResearchAgent(delay=0.2))
+    plan = LeaderPlan(
+        goal="research", plan_type="research",
+        steps=[{"id": "research-1", "agent": "research",
+                "action": "recommend_papers", "input": {"query": "graphs"}}],
+    )
+
+    results = dispatcher.execute("default", turn_id, plan, None, make_context())
+
+    assert results[0].status == "failed"
+    assert results[0].errors[0].stage == "timeout"
+
+
+def test_timeout_dependency_marks_idea_skipped(dispatch_store):
+    store, turn_id = dispatch_store
+    dispatcher = make_dispatcher(store, StubResearchAgent(delay=0.2))
+
+    results = dispatcher.execute(
+        "default", turn_id, research_then_idea_plan(), make_log(), make_context()
+    )
+
+    assert [result.status for result in results] == ["failed", "skipped"]
+    assert results[0].errors[0].stage == "timeout"
+    assert results[1].errors[0].stage == "dependency"
+
+
+def test_typed_knowledge_failure_is_recoverable_and_persisted(dispatch_store):
+    store, turn_id = dispatch_store
+    dispatcher = DirectAgentDispatcher(
+        knowledge_service=StubKnowledgeService(
+            error=QAServiceError("retrieval unavailable", status_code=503)
+        ),
+        research_agent=None,
+        idea_agent=None,
+        session_store=store,
+        agent_step_timeout_seconds=0.05,
+    )
+
+    results = dispatcher.execute(
+        "default", turn_id, knowledge_plan(), None, make_context()
+    )
+
+    assert results[0].status == "failed"
+    assert results[0].errors == [
+        AgentError(
+            agent_name="knowledge",
+            stage="knowledge_answer",
+            message="retrieval unavailable",
+            recoverable=True,
+        )
+    ]
+    with sqlite3.connect(store.database_path) as connection:
+        status, error_json = connection.execute(
+            "SELECT status, error_json FROM agent_runs"
+        ).fetchone()
+    assert status == "failed"
+    assert "retrieval unavailable" in error_json
+
+
+def test_unexpected_exception_persists_failed_then_reraises(dispatch_store):
+    store, turn_id = dispatch_store
+    dispatcher = make_dispatcher(store, StubResearchAgent(error=TypeError("bug")))
+    plan = LeaderPlan(
+        goal="research", plan_type="research",
+        steps=[{"id": "research-1", "agent": "research",
+                "action": "recommend_papers", "input": {"query": "graphs"}}],
+    )
+
+    with pytest.raises(TypeError, match="bug"):
+        dispatcher.execute("default", turn_id, plan, None, make_context())
+
+    with sqlite3.connect(store.database_path) as connection:
+        row = connection.execute(
+            "SELECT status, error_json FROM agent_runs"
+        ).fetchone()
+    assert row[0] == "failed"
+    assert "bug" in row[1]

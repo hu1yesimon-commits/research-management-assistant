@@ -405,6 +405,14 @@ class SessionStore:
             ).fetchone()
         return "" if row is None else row["summary"]
 
+    def latest_message_id(self, session_id: str) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(id), 0) AS id FROM messages WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        return row["id"]
+
     def upsert_agent_context(
         self,
         session_id: str,
