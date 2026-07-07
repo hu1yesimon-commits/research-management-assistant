@@ -55,7 +55,15 @@ class StubDispatcher:
         self.on_execute = on_execute
         self.call_count = 0
 
-    def execute(self, session_id, turn_id, plan, experiment_log, context):
+    def execute(
+        self,
+        session_id,
+        turn_id,
+        plan,
+        experiment_log,
+        context,
+        remaining_turn_seconds=None,
+    ):
         self.call_count += 1
         if self.on_execute is not None:
             self.on_execute(session_id, turn_id)
@@ -321,3 +329,20 @@ def test_summary_runs_only_after_turn_completion(dependencies):
     service.run("default", make_request())
 
     assert observed == ["completed"]
+
+
+def test_summary_failure_is_nonfatal_and_replay_remains_completed(dependencies):
+    class FailingSummary:
+        def maybe_refresh(self, session_id):
+            raise RuntimeError("summary unavailable")
+
+    service = make_service(dependencies, summary_service=FailingSummary())
+    request = make_request(key="summary-failure")
+
+    first = service.run("default", request)
+    replay = service.run("default", request)
+
+    assert first == replay
+    assert first.status == "completed"
+    turn = dependencies["store"].get_turn("default", first.turn_id)
+    assert turn["status"] == "completed"

@@ -4,7 +4,7 @@ import time
 import pytest
 
 from agent_team.contracts import AgentError, AgentResult, LeaderPlan, ResearchResult
-from agent_team.dispatcher import DirectAgentDispatcher
+from agent_team.dispatcher import DirectAgentDispatcher, TurnDeadlineExceeded
 from agent_team.idea_agent import IdeaAgent
 from agent_team.research_agent import ResearchAgent
 from graph.errors import DiscoveryStageError
@@ -248,8 +248,10 @@ class StubResearchAgent:
 class StubIdeaAgent:
     def __init__(self):
         self.received_candidates = None
+        self.call_count = 0
 
     def run(self, **kwargs):
+        self.call_count += 1
         self.received_candidates = kwargs["research_candidates"]
         return AgentResult(
             agent_name="idea", action="generate_ideas", status="completed",
@@ -478,3 +480,60 @@ def test_unexpected_exception_persists_failed_then_reraises(dispatch_store):
         ).fetchone()
     assert row[0] == "failed"
     assert "bug" in row[1]
+
+
+def test_turn_deadline_expiry_between_steps_never_starts_idea(dispatch_store):
+    store, turn_id = dispatch_store
+    dispatcher = make_dispatcher(store, StubResearchAgent())
+    remaining = iter((1.0, 0.0))
+
+    with pytest.raises(TurnDeadlineExceeded):
+        dispatcher.execute(
+            "default",
+            turn_id,
+            research_then_idea_plan(),
+            make_log(),
+            make_context(),
+            remaining_turn_seconds=lambda: next(remaining),
+        )
+
+    assert dispatcher.idea_agent.call_count == 0
+    with sqlite3.connect(store.database_path) as connection:
+        rows = connection.execute(
+            "SELECT agent_name, status FROM agent_runs ORDER BY started_at, rowid"
+        ).fetchall()
+    assert rows == [("research", "completed")]
+
+
+def test_turn_budget_caps_agent_step_timeout_and_persists_failure(dispatch_store):
+    store, turn_id = dispatch_store
+    dispatcher = make_dispatcher(store, StubResearchAgent(delay=0.2))
+    plan = LeaderPlan(
+        goal="research",
+        plan_type="research",
+        steps=[
+            {
+                "id": "research-1",
+                "agent": "research",
+                "action": "recommend_papers",
+                "input": {"query": "graphs"},
+            }
+        ],
+    )
+
+    with pytest.raises(TurnDeadlineExceeded):
+        dispatcher.execute(
+            "default",
+            turn_id,
+            plan,
+            None,
+            make_context(),
+            remaining_turn_seconds=lambda: 0.01,
+        )
+
+    with sqlite3.connect(store.database_path) as connection:
+        status, error_json = connection.execute(
+            "SELECT status, error_json FROM agent_runs"
+        ).fetchone()
+    assert status == "failed"
+    assert "0.01 seconds" in error_json

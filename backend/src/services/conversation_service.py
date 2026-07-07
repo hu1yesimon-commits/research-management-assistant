@@ -1,3 +1,4 @@
+import logging
 import time
 from collections.abc import Callable
 
@@ -7,10 +8,14 @@ from agent_team.contracts import (
     LeaderPlan,
     PlannerInput,
 )
+from agent_team.dispatcher import TurnDeadlineExceeded
 from agent_team.validator import PlanValidationError
 from services.retrieval_service import RetrievalServiceError
 from services.schemas import IdeaOption, KnowledgeResult
 from services.session_schemas import SessionTurnRequest, SessionTurnResponse
+
+
+logger = logging.getLogger(__name__)
 
 
 class TurnTimeoutError(TimeoutError):
@@ -89,13 +94,17 @@ class ConversationService:
                 results: list[AgentResult] = []
             else:
                 self._check_deadline(deadline)
-                results = self.dispatcher.execute(
-                    session_id,
-                    start.turn_id,
-                    plan,
-                    request.experiment_log,
-                    context,
-                )
+                try:
+                    results = self.dispatcher.execute(
+                        session_id,
+                        start.turn_id,
+                        plan,
+                        request.experiment_log,
+                        context,
+                        remaining_turn_seconds=lambda: deadline - self.monotonic(),
+                    )
+                except TurnDeadlineExceeded as exc:
+                    raise TurnTimeoutError(str(exc)) from exc
 
             self._check_deadline(deadline)
             assistant_message = self.responder.respond(
@@ -115,11 +124,14 @@ class ConversationService:
                 response.model_dump(mode="json"),
                 plan.model_dump(mode="json"),
             )
-            self.summary_service.maybe_refresh(session_id)
-            return response
         except Exception as exc:
             self.store.fail_turn(start.turn_id, self._error_payload(exc))
             raise
+        try:
+            self.summary_service.maybe_refresh(session_id)
+        except Exception:
+            logger.exception("session summary refresh failed for %s", session_id)
+        return response
 
     @staticmethod
     def _planner_input(request: SessionTurnRequest, context: object) -> PlannerInput:

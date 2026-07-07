@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Protocol
 
@@ -12,6 +13,10 @@ from services.schemas import ExperimentLogRequest, KnowledgeResult
 from services.session_schemas import SessionContext
 
 
+class TurnDeadlineExceeded(TimeoutError):
+    """Raised when the enclosing Turn budget is exhausted between Agent steps."""
+
+
 class AgentDispatcher(Protocol):
     def execute(
         self,
@@ -20,6 +25,7 @@ class AgentDispatcher(Protocol):
         plan: LeaderPlan,
         experiment_log: ExperimentLogRequest | None,
         context: SessionContext,
+        remaining_turn_seconds: Callable[[], float] | None = None,
     ) -> list[AgentResult]:
         """Execute a validated bounded plan."""
 
@@ -46,11 +52,17 @@ class DirectAgentDispatcher:
         plan: LeaderPlan,
         experiment_log: ExperimentLogRequest | None,
         context: SessionContext,
+        remaining_turn_seconds: Callable[[], float] | None = None,
     ) -> list[AgentResult]:
         results: list[AgentResult] = []
         results_by_step: dict[str, AgentResult] = {}
 
         for step in plan.steps:
+            turn_budget = (
+                None if remaining_turn_seconds is None else remaining_turn_seconds()
+            )
+            if turn_budget is not None and turn_budget <= 0:
+                raise TurnDeadlineExceeded("turn deadline expired before agent step")
             run_id = self.session_store.start_agent_run(
                 session_id,
                 turn_id,
@@ -78,6 +90,7 @@ class DirectAgentDispatcher:
                     experiment_log,
                     context,
                     results_by_step,
+                    turn_budget,
                 )
                 if result.status == "completed":
                     self._persist_context(session_id, step, result, experiment_log, context)
@@ -96,6 +109,7 @@ class DirectAgentDispatcher:
         experiment_log: ExperimentLogRequest | None,
         context: SessionContext,
         results_by_step: dict[str, AgentResult],
+        turn_budget_seconds: float | None,
     ) -> AgentResult:
         executor = ThreadPoolExecutor(max_workers=1)
         future = executor.submit(
@@ -107,8 +121,13 @@ class DirectAgentDispatcher:
             context,
             results_by_step,
         )
+        step_timeout = self.agent_step_timeout_seconds
+        turn_limited = False
+        if turn_budget_seconds is not None:
+            step_timeout = min(step_timeout, turn_budget_seconds)
+            turn_limited = turn_budget_seconds <= self.agent_step_timeout_seconds
         try:
-            result = future.result(timeout=self.agent_step_timeout_seconds)
+            result = future.result(timeout=step_timeout)
         except FutureTimeoutError:
             result = AgentResult(
                 agent_name=step.agent,
@@ -118,7 +137,7 @@ class DirectAgentDispatcher:
                     AgentError(
                         agent_name=step.agent,
                         stage="timeout",
-                        message=f"agent step exceeded {self.agent_step_timeout_seconds} seconds",
+                        message=f"agent step exceeded {step_timeout} seconds",
                     )
                 ],
             )
@@ -128,6 +147,10 @@ class DirectAgentDispatcher:
                 error=[error.model_dump() for error in result.errors],
             )
             executor.shutdown(wait=False, cancel_futures=True)
+            if turn_limited:
+                raise TurnDeadlineExceeded(
+                    "turn deadline expired during agent step"
+                )
             return result
         except Exception as exc:
             self.session_store.finish_agent_run(
