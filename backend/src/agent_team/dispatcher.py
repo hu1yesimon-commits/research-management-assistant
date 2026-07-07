@@ -129,6 +129,14 @@ class DirectAgentDispatcher:
         try:
             result = future.result(timeout=step_timeout)
         except FutureTimeoutError:
+            try:
+                future.result()
+            except BaseException:
+                # The elapsed timeout owns the outcome; the late callable result is
+                # deliberately discarded after its thread has fully terminated.
+                pass
+            finally:
+                executor.shutdown(wait=True, cancel_futures=True)
             result = AgentResult(
                 agent_name=step.agent,
                 action=step.action,
@@ -146,7 +154,6 @@ class DirectAgentDispatcher:
                 "failed",
                 error=[error.model_dump() for error in result.errors],
             )
-            executor.shutdown(wait=False, cancel_futures=True)
             if turn_limited:
                 raise TurnDeadlineExceeded(
                     "turn deadline expired during agent step"

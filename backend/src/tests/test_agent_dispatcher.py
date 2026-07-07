@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 import time
 
 import pytest
@@ -537,3 +538,66 @@ def test_turn_budget_caps_agent_step_timeout_and_persists_failure(dispatch_store
         ).fetchone()
     assert status == "failed"
     assert "0.01 seconds" in error_json
+
+
+def test_timeout_waits_for_running_research_before_failure_and_dependency_skip(
+    dispatch_store, monkeypatch
+):
+    store, turn_id = dispatch_store
+    release = threading.Event()
+    events = []
+
+    class ControlledResearch:
+        thread = None
+        finished = False
+
+        def run(self, **kwargs):
+            self.thread = threading.current_thread()
+            release.wait(timeout=1)
+            events.append("side_effect")
+            self.finished = True
+            return AgentResult(
+                agent_name="research",
+                action="recommend_papers",
+                status="completed",
+                research=ResearchResult(requested_top_k=5, returned_count=0),
+            )
+
+    research = ControlledResearch()
+    dispatcher = make_dispatcher(store, research)
+    dispatcher.agent_step_timeout_seconds = 0.01
+    original_finish = store.finish_agent_run
+
+    def recording_finish(*args, **kwargs):
+        events.append("persist")
+        return original_finish(*args, **kwargs)
+
+    monkeypatch.setattr(store, "finish_agent_run", recording_finish)
+    releaser = threading.Thread(
+        target=lambda: (time.sleep(0.05), release.set()),
+        name="test-timeout-releaser",
+    )
+    releaser.start()
+    started = time.monotonic()
+
+    results = dispatcher.execute(
+        "default",
+        turn_id,
+        research_then_idea_plan(),
+        make_log(),
+        make_context(),
+    )
+    elapsed = time.monotonic() - started
+    releaser.join(timeout=1)
+
+    assert elapsed >= 0.05
+    assert research.finished is True
+    assert research.thread is not None and not research.thread.is_alive()
+    assert events[:2] == ["side_effect", "persist"]
+    assert [result.status for result in results] == ["failed", "skipped"]
+    assert dispatcher.idea_agent.call_count == 0
+    with sqlite3.connect(store.database_path) as connection:
+        rows = connection.execute(
+            "SELECT agent_name, status FROM agent_runs ORDER BY started_at, rowid"
+        ).fetchall()
+    assert rows == [("research", "failed"), ("idea", "skipped")]
