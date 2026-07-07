@@ -9,17 +9,28 @@ from agent_team.contracts import (
     PlannerInput,
     ResearchResult,
 )
+from agent_team import providers
+from agent_team.providers import validate_provider_name
 from agent_team.planner import (
     DeterministicLeaderPlanner,
     DeterministicLeaderResponder,
     LeaderPromptBuilder,
     StructuredLLMLeaderPlanner,
-    validate_provider_name,
 )
 from agent_team.prompts import FEW_SHOT_CASES, LEADER_SYSTEM_PROMPT
 from agent_team.validator import PlanValidator
 from config import Config
-from services.schemas import ExperimentLogRequest, KnowledgeSearchResult
+from services.schemas import (
+    ExperimentLogRequest,
+    IdeaOption,
+    IdeaResult,
+    KnowledgeResult,
+    KnowledgeSearchResult,
+)
+from services.session_context import (
+    DeterministicSummaryGenerator,
+    LLMSummaryGenerator,
+)
 from services.session_schemas import SessionContext, StoredMessage
 
 
@@ -598,6 +609,61 @@ def test_deterministic_responder_deduplicates_errors_across_agent_results():
     assert response.count(f"error: {repeated_error}") == 1
 
 
+def test_deterministic_responder_renders_successful_typed_payloads():
+    planner_input = make_input(
+        "Find papers then propose ideas", experiment_log=make_log()
+    )
+    plan = DeterministicLeaderPlanner().plan(planner_input)
+    results = [
+        AgentResult(
+            agent_name="knowledge",
+            action="answer",
+            status="completed",
+            knowledge=KnowledgeResult(
+                enabled=True,
+                answer="Saved evidence supports residual connections.",
+                mode="grounded",
+            ),
+        ),
+        AgentResult(
+            agent_name="research",
+            action="recommend_papers",
+            status="completed",
+            research=ResearchResult(
+                requested_top_k=5,
+                returned_count=1,
+                top_k=[{"paper_id": "paper-1", "title": "Graph Reconstruction"}],
+            ),
+        ),
+        AgentResult(
+            agent_name="idea",
+            action="generate_ideas",
+            status="completed",
+            idea=IdeaResult(
+                enabled=True,
+                ideas=[
+                    IdeaOption(
+                        title="Add residual decoding",
+                        rationale="Preserve thin structures.",
+                        expected_benefit="Higher recall",
+                        risk="Extra parameters",
+                        suggested_validation_metric="thin-structure recall",
+                        next_small_experiment="Run one seeded ablation.",
+                    )
+                ],
+            ),
+        ),
+    ]
+
+    response = DeterministicLeaderResponder().respond(planner_input, plan, results)
+
+    assert "Saved evidence supports residual connections." in response
+    assert "Graph Reconstruction" in response
+    assert "paper-1" in response
+    assert "Add residual decoding" in response
+    assert "Run one seeded ablation." in response
+
+
 @pytest.mark.parametrize(
     ("message", "expected"),
     [
@@ -619,6 +685,70 @@ def test_provider_name_validation_is_explicit_and_never_falls_back():
         assert validate_provider_name(provider) == provider
     with pytest.raises(ValueError, match="Unsupported provider"):
         validate_provider_name("unknown")
+
+
+class RecordingChatModel:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+def test_provider_factories_keep_deterministic_defaults_offline():
+    configured = Config()
+
+    assert isinstance(
+        providers.build_leader_planner(configured), DeterministicLeaderPlanner
+    )
+    assert isinstance(
+        providers.build_summary_generator(configured), DeterministicSummaryGenerator
+    )
+
+
+@pytest.mark.parametrize("provider", ["openai", "deepseek"])
+def test_provider_factories_construct_permitted_real_leader_and_summary(provider):
+    configured = Config(
+        leader_provider=provider,
+        summary_provider=provider,
+        leader_model="leader-test-model",
+        leader_temperature=0.25,
+        deepseek_api_key="test-key",
+        deepseek_base_url="https://deepseek.invalid/v1",
+    )
+
+    leader = providers.build_leader_planner(
+        configured, chat_model_cls=RecordingChatModel
+    )
+    summary = providers.build_summary_generator(
+        configured, chat_model_cls=RecordingChatModel
+    )
+
+    assert isinstance(leader, StructuredLLMLeaderPlanner)
+    assert isinstance(summary, LLMSummaryGenerator)
+    assert leader.chat_model.kwargs["model"] == "leader-test-model"
+    assert leader.chat_model.kwargs["temperature"] == 0.25
+    assert summary.chat_model.kwargs == leader.chat_model.kwargs
+    if provider == "deepseek":
+        assert leader.chat_model.kwargs["api_key"] == "test-key"
+        assert leader.chat_model.kwargs["base_url"] == "https://deepseek.invalid/v1"
+    else:
+        assert "api_key" not in leader.chat_model.kwargs
+        assert "base_url" not in leader.chat_model.kwargs
+
+
+@pytest.mark.parametrize(
+    ("factory_name", "field"),
+    [
+        ("build_leader_planner", "leader_provider"),
+        ("build_summary_generator", "summary_provider"),
+    ],
+)
+def test_provider_factories_reject_unknown_names_at_construction(factory_name, field):
+    configured = Config()
+    setattr(configured, field, "unknown")
+
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        getattr(providers, factory_name)(
+            configured, chat_model_cls=RecordingChatModel
+        )
 
 
 @pytest.mark.parametrize(

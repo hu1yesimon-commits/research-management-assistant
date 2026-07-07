@@ -11,7 +11,6 @@ from agent_team.contracts import (
     PlanStep,
 )
 from agent_team.prompts import FEW_SHOT_CASES, LEADER_SYSTEM_PROMPT
-from agent_team.providers import validate_provider_name
 from agent_team.research_routing import ResearchRoutingParser
 
 
@@ -230,6 +229,7 @@ class DeterministicLeaderPlanner:
             re.search(r"\b(?:create|add|spawn)\b.{0,40}\bagent\b", message)
         )
 
+
 class DeterministicLeaderResponder:
     """Summarize typed execution outcomes without generating new evidence."""
 
@@ -255,6 +255,17 @@ class DeterministicLeaderResponder:
             lines.append(
                 f"{result.agent_name} {result.action}: {result.status}"
             )
+            if result.status == "completed":
+                for label, payload in (
+                    ("knowledge", result.knowledge),
+                    ("research", result.research),
+                    ("idea", result.idea),
+                ):
+                    if payload is not None:
+                        lines.append(
+                            f"{label}: "
+                            f"{json.dumps(payload.model_dump(exclude_none=True), ensure_ascii=False)}"
+                        )
             error_messages = [error.message for error in result.errors]
             for payload in (result.knowledge, result.research, result.idea):
                 if payload is not None and payload.error:
