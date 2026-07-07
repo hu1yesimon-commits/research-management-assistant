@@ -2332,3 +2332,14 @@ Contract decisions made: all new API dependencies share config.database_path and
 Known failures or blockers: initial review found injectable database_path, inconsistent non-default-session behavior, and broad ValueError mapping; all were fixed by 62be2fd; no remaining Task 11 blocker
 Next unblocked wave: resume Wave 9 with Task 12 Session Chat Frontend; execution intentionally paused before Task 12 per user request
 ```
+
+```text
+Wave: 9 (continued; Task 12 complete)
+Owner model: GPT-5.4 medium for Task 12 session-first frontend wiring
+Completed task commits: pending in current worktree
+Current worktree and branch: /Users/nuonuohu/Developer/graphReconstruction/.worktrees/agent-team-v3; codex/agent-team-v3
+Verification commands and results: frontend Vitest `src/components/__tests__/SessionChatPanel.test.js` and `src/components/__tests__/ResearchWorkbench.test.js` passed with 7 tests; `npm run build` passed; `git diff --check` passed
+Contract decisions made: the default permanent Session is now the primary workbench path; session chat history renders only user and assistant messages; turn submission generates one idempotency key and reuses it only for manual retry of the same failed draft; legacy Research Query and Idea Assistant remain available behind a collapsed Legacy tools section; saved papers now load from `/papers` while active session candidates are refreshed on turn boundaries for follow-up Task 13 UI
+Known failures or blockers: no independent task review was run in this continuation; active session candidates are refreshed and cleared in state but not rendered until Task 13
+Next unblocked wave: continue Wave 9 with Task 13 Active Candidate, Saved Paper, and Agent Trace UI
+```

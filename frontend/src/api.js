@@ -64,6 +64,35 @@ export function getMemorySummary() {
   return request("/memory/summary");
 }
 
+export function createSessionTurn(sessionId, payload) {
+  return request(`/sessions/${sessionId}/turns`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getSessionMessages(sessionId, beforeId = null) {
+  const query = beforeId ? `?before_id=${beforeId}` : "";
+  return request(`/sessions/${sessionId}/messages${query}`);
+}
+
+export function getActiveCandidates(sessionId) {
+  return request(`/sessions/${sessionId}/candidates/active`);
+}
+
+export function acceptSessionCandidate(sessionId, candidateId) {
+  return request(`/sessions/${sessionId}/candidates/${candidateId}/accept`, {
+    method: "POST",
+  });
+}
+
+export function getSavedPapers() {
+  return request("/papers");
+}
+
 export function recommendIdeas(payload) {
   return request("/ideas/recommend", {
     method: "POST",

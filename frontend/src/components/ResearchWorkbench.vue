@@ -3,7 +3,7 @@
     <header class="topbar">
       <div>
         <h1>Research Workbench</h1>
-        <p>Assistant-first research flow with direct query fallback and local lifecycle controls.</p>
+        <p>Persistent default-session chat with legacy query and lifecycle tools kept available during migration.</p>
       </div>
       <div class="status-cluster">
         <span class="badge" :class="healthBadgeClass">{{ healthLabel }}</span>
@@ -23,14 +23,12 @@
       <strong>Partial failure:</strong> one workflow section failed, but the other section may still be usable.
     </div>
 
-    <AssistantWorkflowPanel
-      :run-assistant="handleAssistant"
-      @success="handleAssistantSuccess"
-      @failure="handleAssistantFailure"
+    <SessionChatPanel
+      :messages="sessionMessages"
+      :run-turn="handleSessionTurn"
+      @turn-completed="handleSessionTurnCompleted"
+      @turn-failed="handleSessionTurnFailed"
     />
-    <AssistantSummaryPanel :summary="assistantSummary" />
-
-    <p class="meta">Results source: {{ resultSourceLabel }}</p>
     <section class="workspace-grid">
       <KnowledgePanel :knowledge="knowledgeSection" />
       <DiscoveryPanel
@@ -40,14 +38,32 @@
       />
     </section>
 
-    <section :class="['panel', 'panel--full', !isLifecycleOpen && 'panel--collapsed']">
+    <section :class="['panel', 'panel--full', !isLegacyToolsOpen && 'panel--collapsed']">
       <div class="panel__heading">
         <div>
-          <h2>Research Query</h2>
-          <p>Fallback path for direct <code>POST /research/query</code> calls when you want manual control.</p>
+          <h2>Legacy tools</h2>
+          <p>Temporary compatibility path for direct query control and the standalone idea form.</p>
         </div>
+        <button class="button button--ghost legacy-tools__toggle" type="button" @click="isLegacyToolsOpen = !isLegacyToolsOpen">
+          {{ isLegacyToolsOpen ? "Hide" : "Open" }}
+        </button>
       </div>
-      <QueryForm :loading="queryLoading" @submit="handleQuery" />
+
+      <div v-if="isLegacyToolsOpen" class="legacy-tools__body">
+        <section class="panel__section">
+          <div class="section-title">
+            <div>
+              <h3>Research Query</h3>
+              <p>Fallback path for direct <code>POST /research/query</code> calls when you want manual control.</p>
+            </div>
+          </div>
+          <QueryForm :loading="queryLoading" @submit="handleQuery" />
+        </section>
+
+        <section class="panel__section">
+          <IdeaAssistantPanel />
+        </section>
+      </div>
     </section>
 
     <section class="panel panel--full">
@@ -56,7 +72,7 @@
           <h2>Saved Candidates & Lifecycle</h2>
           <p>Persisted papers, PDF upload, and embedding stay out of the main result flow by default.</p>
         </div>
-        <button class="button button--ghost" type="button" @click="isLifecycleOpen = !isLifecycleOpen">
+        <button class="button button--ghost lifecycle-tools__toggle" type="button" @click="isLifecycleOpen = !isLifecycleOpen">
           {{ isLifecycleOpen ? "Hide" : "Open" }}
         </button>
       </div>
@@ -87,8 +103,6 @@
       :loading="memorySummaryLoading"
       :error="memorySummaryError"
     />
-
-    <IdeaAssistantPanel />
   </main>
 </template>
 
@@ -98,39 +112,43 @@ import { computed, onMounted, reactive, ref } from "vue";
 import {
   API_BASE_URL,
   acceptPaper,
+  createSessionTurn,
   embedPaper,
-  getCandidates,
+  getActiveCandidates,
   getHealth,
   getMemorySummary,
-  researchAssistant,
+  getSavedPapers,
+  getSessionMessages,
   researchQuery,
   uploadPdf,
 } from "../api";
-import AssistantSummaryPanel from "./AssistantSummaryPanel.vue";
-import AssistantWorkflowPanel from "./AssistantWorkflowPanel.vue";
 import CandidateLifecyclePanel from "./CandidateLifecyclePanel.vue";
 import DiscoveryPanel from "./DiscoveryPanel.vue";
-import IdeaAssistantPanel from "./IdeaAssistantPanel.vue";
 import KnowledgePanel from "./KnowledgePanel.vue";
 import MemorySummaryCard from "./MemorySummaryCard.vue";
 import QueryForm from "./QueryForm.vue";
+import SessionChatPanel from "./SessionChatPanel.vue";
+import IdeaAssistantPanel from "./IdeaAssistantPanel.vue";
 
 const healthStatus = ref("checking");
 const healthError = ref("");
 const queryLoading = ref(false);
 const queryError = ref("");
 const queryResponse = ref(null);
-const assistantResponse = ref(null);
+const latestTurnResponse = ref(null);
 const memorySummary = ref(null);
 const memorySummaryLoading = ref(false);
 const memorySummaryError = ref("");
-const activeResultSource = ref("query");
+const activeResultSource = ref("session");
+const sessionId = "default";
+const sessionMessages = ref([]);
 const candidates = ref([]);
 const candidatesLoading = ref(false);
 const candidatesError = ref("");
 const candidateActionStates = reactive({});
 const selectedFiles = reactive({});
 const isLifecycleOpen = ref(false);
+const isLegacyToolsOpen = ref(false);
 const candidateActionHint = ref("");
 
 const apiBaseUrl = API_BASE_URL;
@@ -149,33 +167,17 @@ const defaultKnowledgeSection = {
   mode: null,
 };
 
-const assistantSummary = computed(() => {
-  if (!assistantResponse.value) {
-    return null;
-  }
-  return {
-    mode: assistantResponse.value.mode,
-    route: assistantResponse.value.route,
-    coverage_score: assistantResponse.value.coverage_score,
-    route_reason: assistantResponse.value.route_reason,
-    assistant_message: assistantResponse.value.assistant_message,
-    next_action: assistantResponse.value.next_action,
-    suggested_user_actions: assistantResponse.value.suggested_user_actions,
-    errors: assistantResponse.value.errors,
-  };
-});
+const discoverySection = computed(() =>
+  activeResultSource.value === "query"
+    ? queryResponse.value?.discovery || defaultDiscoverySection
+    : defaultDiscoverySection,
+);
 
-const activeResponse = computed(() => {
-  if (activeResultSource.value === "assistant") {
-    return assistantResponse.value;
+const knowledgeSection = computed(() => {
+  if (activeResultSource.value === "session") {
+    return latestTurnResponse.value?.knowledge || defaultKnowledgeSection;
   }
-  return queryResponse.value;
-});
-
-const discoverySection = computed(() => activeResponse.value?.discovery || defaultDiscoverySection);
-const knowledgeSection = computed(() => activeResponse.value?.knowledge || defaultKnowledgeSection);
-const resultSourceLabel = computed(() => {
-  return activeResultSource.value === "assistant" ? "assistant" : "research/query";
+  return queryResponse.value?.knowledge || defaultKnowledgeSection;
 });
 
 const hasPartialFailure = computed(() => {
@@ -204,6 +206,8 @@ const healthBadgeClass = computed(() => {
 
 onMounted(() => {
   loadHealth();
+  loadSessionMessages();
+  loadActiveCandidates();
   loadCandidates();
   loadMemorySummary();
 });
@@ -238,13 +242,15 @@ async function handleQuery(payload) {
   }
 }
 
-function handleAssistant(payload) {
-  return researchAssistant(payload);
+function handleSessionTurn(payload) {
+  candidates.value = [];
+  return createSessionTurn(sessionId, payload);
 }
 
-function handleAssistantSuccess(response) {
-  assistantResponse.value = response;
-  activeResultSource.value = "assistant";
+async function handleSessionTurnCompleted(response) {
+  latestTurnResponse.value = response;
+  activeResultSource.value = "session";
+  await Promise.all([loadSessionMessages(), loadActiveCandidates()]);
 }
 
 async function loadMemorySummary() {
@@ -260,9 +266,9 @@ async function loadMemorySummary() {
   }
 }
 
-function handleAssistantFailure() {
-  assistantResponse.value = null;
-  activeResultSource.value = "query";
+function handleSessionTurnFailed() {
+  latestTurnResponse.value = null;
+  activeResultSource.value = queryResponse.value ? "query" : "session";
 }
 
 async function loadCandidates() {
@@ -270,12 +276,30 @@ async function loadCandidates() {
   candidatesError.value = "";
 
   try {
-    const response = await getCandidates();
+    const response = await getSavedPapers();
     candidates.value = Array.isArray(response) ? response : [];
   } catch (error) {
     candidatesError.value = error.message;
   } finally {
     candidatesLoading.value = false;
+  }
+}
+
+async function loadSessionMessages() {
+  try {
+    const response = await getSessionMessages(sessionId);
+    sessionMessages.value = Array.isArray(response?.items) ? response.items : [];
+  } catch {
+    sessionMessages.value = [];
+  }
+}
+
+async function loadActiveCandidates() {
+  try {
+    const response = await getActiveCandidates(sessionId);
+    void response;
+  } catch {
+    // Task 12 only clears and refreshes the active candidate cache.
   }
 }
 
