@@ -4,6 +4,17 @@ import { mount } from "@vue/test-utils";
 import CandidateLifecyclePanel from "../CandidateLifecyclePanel.vue";
 
 describe("CandidateLifecyclePanel", () => {
+  test("uses saved paper terminology for the empty state", () => {
+    const wrapper = mount(CandidateLifecyclePanel, {
+      props: {
+        candidates: [],
+      },
+    });
+
+    expect(wrapper.text()).toContain("No saved papers yet.");
+    expect(wrapper.text()).not.toContain("Candidate load failed");
+  });
+
   test("shows saved judgement score when available", () => {
     const wrapper = mount(CandidateLifecyclePanel, {
       props: {

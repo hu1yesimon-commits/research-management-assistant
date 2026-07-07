@@ -7,10 +7,10 @@
     </div>
 
     <div v-if="error" class="alert alert--danger">
-      <strong>Candidate load failed:</strong> {{ error }}
+      <strong>Saved paper load failed:</strong> {{ error }}
     </div>
 
-    <p v-if="loading" class="empty-state">Loading candidates...</p>
+    <p v-if="loading" class="empty-state">Loading saved papers...</p>
     <p v-else-if="!candidates.length" class="empty-state">
       No saved papers yet. Accept a discovery candidate to start building your local research set.
     </p>

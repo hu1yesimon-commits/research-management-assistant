@@ -30,6 +30,17 @@
       @turn-failed="handleSessionTurnFailed"
     />
     <section class="workspace-grid">
+      <ActiveCandidatesPanel
+        :candidates="activeCandidates"
+        :accept-candidate="handleActiveCandidateAccept"
+      />
+      <AgentTracePanel
+        :plan="latestTurnResponse?.plan || null"
+        :agent-runs="latestTurnResponse?.agent_runs || []"
+        :errors="latestTurnResponse?.errors || []"
+      />
+    </section>
+    <section class="workspace-grid">
       <KnowledgePanel :knowledge="knowledgeSection" />
       <DiscoveryPanel
         :discovery="discoverySection"
@@ -112,6 +123,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import {
   API_BASE_URL,
   acceptPaper,
+  acceptSessionCandidate,
   createSessionTurn,
   embedPaper,
   getActiveCandidates,
@@ -122,6 +134,8 @@ import {
   researchQuery,
   uploadPdf,
 } from "../api";
+import ActiveCandidatesPanel from "./ActiveCandidatesPanel.vue";
+import AgentTracePanel from "./AgentTracePanel.vue";
 import CandidateLifecyclePanel from "./CandidateLifecyclePanel.vue";
 import DiscoveryPanel from "./DiscoveryPanel.vue";
 import KnowledgePanel from "./KnowledgePanel.vue";
@@ -142,6 +156,7 @@ const memorySummaryError = ref("");
 const activeResultSource = ref("session");
 const sessionId = "default";
 const sessionMessages = ref([]);
+const activeCandidates = ref([]);
 const candidates = ref([]);
 const candidatesLoading = ref(false);
 const candidatesError = ref("");
@@ -244,6 +259,7 @@ async function handleQuery(payload) {
 
 function handleSessionTurn(payload) {
   candidates.value = [];
+  activeCandidates.value = [];
   return createSessionTurn(sessionId, payload);
 }
 
@@ -297,10 +313,18 @@ async function loadSessionMessages() {
 async function loadActiveCandidates() {
   try {
     const response = await getActiveCandidates(sessionId);
-    void response;
+    activeCandidates.value = Array.isArray(response) ? response : [];
   } catch {
-    // Task 12 only clears and refreshes the active candidate cache.
+    activeCandidates.value = [];
   }
+}
+
+async function handleActiveCandidateAccept(candidateId) {
+  await acceptSessionCandidate(sessionId, candidateId);
+  activeCandidates.value = activeCandidates.value.filter(
+    (candidate) => candidate.id !== candidateId,
+  );
+  await Promise.all([loadCandidates(), loadMemorySummary()]);
 }
 
 function handleFileSelection({ paperId, file }) {
