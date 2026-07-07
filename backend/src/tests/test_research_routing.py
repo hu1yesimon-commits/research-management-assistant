@@ -27,6 +27,8 @@ def test_explicit_research_negation_is_denied(message):
     [
         "Find recent papers",
         "Recommend three relevant papers",
+        "recent time series classification papers",
+        "latest graph neural network reconstruction literature",
         "Show me papers",
         "I need literature",
         "Find papers about creating new agent architectures",

@@ -67,6 +67,16 @@ class ResearchRoutingParser:
         "article",
         "articles",
     }
+    _FRESH_TARGET_BLOCKERS = {
+        "log",
+        "logs",
+        "memory",
+        "memories",
+        "material",
+        "materials",
+        "note",
+        "notes",
+    }
     _EXISTING_REVIEW_MODIFIERS = {"existing", "saved", "my", "current", "our"}
     _EXISTING_REVIEW_TARGETS = {
         "paper",
@@ -280,17 +290,14 @@ class ResearchRoutingParser:
             ["latest"],
         ):
             return None
-        index = marker_index + 1
-        modifier_count = 0
-        while index < len(tokens) and modifier_count < 2:
-            if tokens[index].isdigit() or tokens[index] in self._FRESH_TARGET_MODIFIERS:
-                modifier_count += 1
-                index += 1
+        upper_bound = min(len(tokens), marker_index + 8)
+        for index in range(marker_index + 1, upper_bound):
+            if tokens[index] in self._FRESH_TARGET_BLOCKERS:
+                return None
+            if tokens[index] not in self._FRESH_REVIEW_TARGETS:
                 continue
-            break
-        if index >= len(tokens) or tokens[index] not in self._FRESH_REVIEW_TARGETS:
-            return None
-        return index if self._is_valid_academic_target(tokens, index) else None
+            return index if self._is_valid_academic_target(tokens, index) else None
+        return None
 
     def _combine_clause_outcomes(self, outcomes: set[str]):
         if "ambiguous" in outcomes or {"allow", "deny"} <= outcomes:

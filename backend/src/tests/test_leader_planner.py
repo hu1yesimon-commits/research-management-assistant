@@ -338,6 +338,7 @@ def test_deterministic_planner_recognizes_explicit_paper_requests(message):
     [
         ("Recommend three relevant papers about graph reconstruction", "research"),
         ("Recommend relevant papers", "research"),
+        ("recent time series classification papers", "research"),
         ("I do not need papers about X", "clarify"),
         ("Find no papers about X", "clarify"),
         ("I need paper towels", "clarify"),
