@@ -135,6 +135,11 @@ class DeterministicLeaderPlanner:
         asks_for_ideas = self._contains_term(
             normalized,
             ("idea", "ideas", "propose", "next test", "direction"),
+        ) or self._contains_chinese_idea_signal(message)
+        asks_for_research = research_signal.decision == "allow" or self._contains_chinese_research_signal(message)
+        asks_to_avoid_search = self._contains_term(
+            normalized,
+            ("already saved", "saved", "do not search", "do not search again", "answer from the evidence"),
         )
 
         if research_signal.needs_clarify or research_signal.decision == "conflict":
@@ -151,7 +156,7 @@ class DeterministicLeaderPlanner:
                     message,
                     "Please provide the experiment log before asking for ideas.",
                 )
-            if research_signal.decision == "allow":
+            if asks_for_research:
                 return _bounded_plan("research_then_idea", message)
             if planner_input.has_knowledge:
                 return _bounded_plan("idea", message)
@@ -160,10 +165,13 @@ class DeterministicLeaderPlanner:
                     "clarify",
                     message,
                     "Should the team search for fresh papers before generating ideas?",
-                )
+            )
             return _bounded_plan("research_then_idea", message)
 
-        if research_signal.decision == "allow":
+        if asks_to_avoid_search and planner_input.has_knowledge:
+            return _bounded_plan("knowledge_qa", message)
+
+        if asks_for_research:
             return _bounded_plan("research", message)
 
         if research_signal.decision == "review_existing":
@@ -228,6 +236,14 @@ class DeterministicLeaderPlanner:
         return bool(
             re.search(r"\b(?:create|add|spawn)\b.{0,40}\bagent\b", message)
         )
+
+    @staticmethod
+    def _contains_chinese_research_signal(message: str) -> bool:
+        return any(term in message for term in ("最新", "论文", "找论文", "搜论文"))
+
+    @staticmethod
+    def _contains_chinese_idea_signal(message: str) -> bool:
+        return any(term in message for term in ("实验建议", "下一步", "建议"))
 
 
 class DeterministicLeaderResponder:

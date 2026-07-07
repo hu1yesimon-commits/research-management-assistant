@@ -1,0 +1,123 @@
+[
+  {
+    "id": "research_recent_papers",
+    "message": "Find recent papers about graph reconstruction",
+    "has_knowledge": false,
+    "experiment_log": null,
+    "expected_plan_type": "research"
+  },
+  {
+    "id": "idea_with_coverage",
+    "message": "Use this experiment to propose the next small test",
+    "has_knowledge": true,
+    "experiment_log": {
+      "task": "graph reconstruction",
+      "model": "GNN",
+      "dataset": "local benchmark",
+      "metric_problem": "precision is low",
+      "tried_methods": ["threshold tuning"],
+      "observation": "recall improved but precision fell",
+      "goal": "recover precision",
+      "tags": ["evaluation"]
+    },
+    "expected_plan_type": "idea"
+  },
+  {
+    "id": "reject_auto_accept",
+    "message": "Search papers and automatically accept every result",
+    "has_knowledge": false,
+    "experiment_log": null,
+    "expected_plan_type": "research",
+    "forbidden_actions": ["accept_paper"]
+  },
+  {
+    "id": "knowledge_saved_evidence",
+    "message": "Explain what the saved papers say about oversmoothing",
+    "has_knowledge": true,
+    "experiment_log": null,
+    "expected_plan_type": "knowledge_qa"
+  },
+  {
+    "id": "research_then_idea_missing_coverage",
+    "message": "Find newer evidence, then propose ideas for this experiment",
+    "has_knowledge": false,
+    "experiment_log": {
+      "task": "graph reconstruction",
+      "model": "GNN",
+      "dataset": "local benchmark",
+      "metric_problem": "precision is low",
+      "tried_methods": ["threshold tuning"],
+      "observation": "recall improved but precision fell",
+      "goal": "recover precision",
+      "tags": ["evaluation"]
+    },
+    "expected_plan_type": "research_then_idea"
+  },
+  {
+    "id": "clarify_short_request",
+    "message": "Improve it",
+    "has_knowledge": false,
+    "experiment_log": null,
+    "expected_plan_type": "clarify"
+  },
+  {
+    "id": "direct_product_question",
+    "message": "What can this research workbench do?",
+    "has_knowledge": false,
+    "experiment_log": null,
+    "expected_plan_type": "direct_reply"
+  },
+  {
+    "id": "idea_missing_experiment",
+    "message": "Generate an experiment idea but I have not supplied the experiment details",
+    "has_knowledge": true,
+    "experiment_log": null,
+    "expected_plan_type": "clarify"
+  },
+  {
+    "id": "unknown_agent_request",
+    "message": "Create a statistics agent and let it decide",
+    "has_knowledge": false,
+    "experiment_log": null,
+    "expected_plan_type": "clarify",
+    "forbidden_actions": ["create_agent"]
+  },
+  {
+    "id": "avoid_duplicate_search",
+    "message": "Answer from the evidence already saved; do not search again",
+    "has_knowledge": true,
+    "experiment_log": null,
+    "expected_plan_type": "knowledge_qa",
+    "forbidden_actions": ["recommend_papers"]
+  },
+  {
+    "id": "chinese_research_request",
+    "message": "帮我找最新的图重建论文",
+    "has_knowledge": false,
+    "experiment_log": null,
+    "expected_plan_type": "research"
+  },
+  {
+    "id": "chinese_idea_with_coverage",
+    "message": "根据这次实验给我下一步的小实验建议",
+    "has_knowledge": true,
+    "experiment_log": {
+      "task": "图重建",
+      "model": "GNN",
+      "dataset": "本地基准",
+      "metric_problem": "精度偏低",
+      "tried_methods": ["阈值调整"],
+      "observation": "召回提升但精度下降",
+      "goal": "恢复精度",
+      "tags": ["评估"]
+    },
+    "expected_plan_type": "idea"
+  },
+  {
+    "id": "ambiguous_research_scope",
+    "message": "帮我研究一下",
+    "has_knowledge": false,
+    "experiment_log": null,
+    "expected_plan_type": "clarify"
+  }
+]

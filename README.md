@@ -1,6 +1,6 @@
 # Research Management MVP
 
-当前仓库已经进入 feature-freeze / interview-polish 收敛状态。已落地的是一个本地优先的 Research Management Assistant MVP：`FastAPI + LangGraph + SQLite` 后端、Vue 3 + Vite Research Workbench、deterministic Idea Assistant MVP、以及 review-gated Memory System MVP。
+当前仓库已经进入 feature-freeze / interview-polish 收敛状态。已落地的是一个本地优先的 Research Management Assistant MVP：`FastAPI + LangGraph + SQLite` 后端、Vue 3 + Vite Research Workbench、bounded synchronous Agent Team V3、deterministic Idea Assistant MVP、以及 review-gated Memory System MVP。
 
 本文档只同步已经完成的事实。默认路径保持 deterministic/offline，不依赖 DeepSeek、OpenAI、BGE-M3、Chroma、arXiv、OpenAlex 或外网；这些真实 provider / 外部源路径都是显式配置后的 optional smoke。`Advanced-lite` 目前是 deterministic query rewrite，不是真实 LLM / RAG research agent。
 
@@ -8,9 +8,10 @@
 
 Implemented and demo-ready:
 
-- Research Workbench frontend: unified `/research/query` UI, discovery/knowledge split view, saved candidate lifecycle, PDF upload/embed controls, and Idea Assistant panel.
+- Research Workbench frontend: default permanent Session chat, active-candidate panel, bounded agent trace, discovery/knowledge split view, saved paper lifecycle, PDF upload/embed controls, and collapsed legacy tools.
 - Backend MVP endpoints: paper discovery, accept/upload/embed lifecycle, retrieval, grounded answer, unified research query, structured experiment logs, Idea Assistant, and Memory System review APIs.
-- Agent Workflow entrypoint: `POST /research/assistant` uses a LangGraph thin orchestration layer to route between `basic_explore`, `advanced_ready`, `advanced_search`, and `research_idea`, while reusing existing discovery, knowledge, memory, and idea services.
+- Agent Team V3 entrypoint: `POST /sessions/default/turns` runs a bounded synchronous `Leader + Research + Idea` workflow with typed plans, validated actions, persisted message history, active session candidates, and agent-run summaries.
+- Legacy Agent Workflow entrypoint: `POST /research/assistant` remains available as a compatibility surface during the migration window.
 - Idea Assistant MVP: structured experiment log in, retrieval-backed evidence lookup, deterministic 3-5 idea options out.
 - Memory System MVP: structured logs as episodic evidence, deterministic `semantic_proposal` candidates, user accept/reject review, confirmed semantic memory, and explicit archive.
 
@@ -35,9 +36,11 @@ Optional real providers:
 
 - FastAPI 入口在 [backend/src/main.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/main.py)
 - SQLite 持久化在 [backend/src/services/memory_store.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/services/memory_store.py)
+- Agent Team V3 编排在 [backend/src/services/conversation_service.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/services/conversation_service.py) 和 [backend/src/agent_team](/Users/nuonuohu/Developer/graphReconstruction/backend/src/agent_team)
 - PDF upload + Phase 2C text extraction/chunking 在 [backend/src/services/knowledge_base.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/services/knowledge_base.py)
 - 基础 graph flow 在 [backend/src/graph/builder.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/graph/builder.py) 和 [backend/src/graph/nodes.py](/Users/nuonuohu/Developer/graphReconstruction/backend/src/graph/nodes.py)
 - Vue 3 + Vite Research Workbench 在 [frontend/src/components/ResearchWorkbench.vue](/Users/nuonuohu/Developer/graphReconstruction/frontend/src/components/ResearchWorkbench.vue)
+- Session chat / trace / active-candidate panels 在 [frontend/src/components/SessionChatPanel.vue](/Users/nuonuohu/Developer/graphReconstruction/frontend/src/components/SessionChatPanel.vue)、[frontend/src/components/AgentTracePanel.vue](/Users/nuonuohu/Developer/graphReconstruction/frontend/src/components/AgentTracePanel.vue)、[frontend/src/components/ActiveCandidatesPanel.vue](/Users/nuonuohu/Developer/graphReconstruction/frontend/src/components/ActiveCandidatesPanel.vue)
 - Idea Assistant panel 在 [frontend/src/components/IdeaAssistantPanel.vue](/Users/nuonuohu/Developer/graphReconstruction/frontend/src/components/IdeaAssistantPanel.vue)
 - API tests、graph tests、store tests 已覆盖当前 MVP 主路径
 
@@ -47,6 +50,16 @@ Optional real providers:
 
 - `GET /health`
   返回 `{"status": "ok"}`
+- `POST /sessions/default/turns`
+  输入 `{"message":"...","idempotency_key":"...","top_k":5}`，执行 bounded synchronous Agent Team V3 turn，返回 `assistant_message`、typed `plan`、`active_candidates`、`knowledge`、`ideas`、`agent_runs`、`errors`
+- `GET /sessions/default/messages`
+  返回默认永久 Session 的持久化消息历史；第一版没有 multi-session UI
+- `GET /sessions/default/candidates/active`
+  只返回当前默认 Session 最新一批仍可操作的 active candidates
+- `POST /sessions/default/candidates/{candidate_id}/accept`
+  接受当前默认 Session 的 active candidate，并把 paper 落入全局 Saved Papers
+- `GET /papers`
+  返回全局 Saved Papers；这和 session-level active candidates 不同
 - `POST /search`
   输入 `{"mode":"basic"|"advanced","query":"..."}`
   调用 paper discovery graph，返回 ranked candidates；discovery results 默认不写入 SQLite
@@ -90,6 +103,18 @@ Optional real providers:
   输入 `{"query":"...","mode":"basic"|"advanced","include_discovery":true,"include_knowledge":true,"top_k":5}`，把外部 discovery 和内部 knowledge answer 编排到一个响应中；`discovery.candidates` 不是 grounded answer sources，`knowledge.sources` 只来自已 `embedded` 的知识块
 - `POST /research/assistant`
   输入 `query` 和可选 `intent`、`experiment_log`、`top_k`、`idea_count`、`save_log`、`include_discovery`，经过 LangGraph assistant workflow 路由后返回 `mode`、`route`、`coverage_score`、`assistant_message`、`next_action`、`discovery`、`knowledge`、`ideas`、`errors`
+
+## Agent Team V3 Boundaries
+
+当前前端主路径是默认永久 Session，不是 multi-session UI。
+
+- `default` Session 持久化 user/assistant messages，但上下文只使用 summary 加最近六个 turns
+- `Leader` 是唯一 user-facing Agent；`Research` 负责 fresh discovery 和 Session candidate batches；`Idea` 只消费已有或新检索到的证据
+- Agent persistence 是 logical persistence：SQLite 中保留 messages、summary、agent runs 和 candidate state，但没有 resident workers
+- 当前 dispatcher 是 synchronous direct execution；SQLite Mailbox 只是后续可替换方案，不是已实现能力
+- `active candidates` 仅属于当前 Session 的临时可操作区
+- `saved papers` 是全局持久化论文库
+- `confirmed memory` 是独立的 review-gated 长期记忆层
 
 ## Persistence
 

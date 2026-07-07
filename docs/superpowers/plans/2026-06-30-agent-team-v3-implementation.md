@@ -2343,3 +2343,14 @@ Contract decisions made: the default permanent Session is now the primary workbe
 Known failures or blockers: no independent task review was run in this continuation; active session candidates are refreshed and cleared in state but not rendered until Task 13
 Next unblocked wave: continue Wave 9 with Task 13 Active Candidate, Saved Paper, and Agent Trace UI
 ```
+
+```text
+Wave: 9 (continued; Tasks 13-14 complete)
+Owner model: GPT-5.4 medium for Task 13 UI separation and Task 14 eval/smoke/docs verification
+Completed task commits: pending in current worktree
+Current worktree and branch: /Users/nuonuohu/Developer/graphReconstruction/.worktrees/agent-team-v3; codex/agent-team-v3
+Verification commands and results: backend pytest passed with 458 tests and 1 existing Starlette/httpx deprecation warning; frontend Vitest passed with 31 tests; Vite build passed; offline smoke printed `AGENT_TEAM_V3_SMOKE_OK=true` and `OFFLINE_MVP_SMOKE_OK=true`; git diff --check passed
+Contract decisions made: active session candidates are now separate from global Saved Papers and only the current active batch exposes Accept; the latest trace shows only the bounded plan, ordered run summaries, and typed errors without prompts or internal context; Saved Papers terminology now reflects `/papers`; deterministic planner eval labels were instantiated exactly from the frozen Task 14 case list, including Chinese request coverage and duplicate-search suppression; offline smoke now proves default-session turn persistence, candidate expiry, candidate acceptance, paired message history, and `/research/assistant` V1 compatibility fields
+Known failures or blockers: no independent task review was run for this continuation; planner eval labels still need explicit user semantic review before the dataset is treated as product truth source
+Next unblocked wave: Wave 9 implementation is complete; hand off to Wave 10 / Task 15 final architecture, concurrency, and failure-semantics review after user review of planner eval labels
+```
