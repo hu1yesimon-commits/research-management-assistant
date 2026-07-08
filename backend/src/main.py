@@ -191,7 +191,7 @@ def get_answer_generator() -> AnswerGenerator:
     if config.answer_provider == "deepseek":
         return LLMAnswerGenerator(
             llm_client=ChatOpenAI(
-                model=config.deepseek_model,
+                model=config.answer_model,
                 temperature=config.answer_temperature,
                 api_key=config.deepseek_api_key,
                 base_url=config.deepseek_base_url,

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
-from services.answer_service import AnswerGenerator
+from services.answer_service import AnswerGenerator, FakeGroundedAnswerGenerator
 from services.retrieval_service import KnowledgeRetrievalService, RetrievalServiceError
 from services.schemas import KnowledgeAnswerResponse, KnowledgeAnswerSource, KnowledgeSearchResult
+
+logger = logging.getLogger(__name__)
 
 
 class QAServiceError(Exception):
@@ -62,7 +65,17 @@ class KnowledgeQAService:
         except QAServiceError:
             raise
         except Exception as exc:
-            raise QAServiceError("knowledge answer generation failed", status_code=502) from exc
+            logger.exception("knowledge answer generation failed; using deterministic fallback")
+            answer = FakeGroundedAnswerGenerator().generate(
+                normalized_question,
+                retrieved_results,
+            )
+            return KnowledgeAnswerResponse(
+                question=normalized_question,
+                answer=answer,
+                sources=sources,
+                mode=f"{self.mode}-fallback",
+            )
         return KnowledgeAnswerResponse(
             question=normalized_question,
             answer=answer,

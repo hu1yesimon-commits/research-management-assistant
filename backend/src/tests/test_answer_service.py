@@ -147,29 +147,29 @@ def test_get_answer_generator_returns_deterministic_by_default():
 def test_get_answer_generator_builds_deepseek_openai_compatible_client(monkeypatch):
     original_provider = config.answer_provider
     original_temperature = config.answer_temperature
+    original_answer_model = config.answer_model
     original_api_key = config.deepseek_api_key
     original_base_url = config.deepseek_base_url
-    original_model = config.deepseek_model
 
     try:
         monkeypatch.setattr(main, "ChatOpenAI", FakeChatOpenAI)
         config.answer_provider = "deepseek"
+        config.answer_model = "deepseek-answer-model"
         config.answer_temperature = 0.0
         config.deepseek_api_key = "test-key"
         config.deepseek_base_url = "https://example.invalid/v1"
-        config.deepseek_model = "deepseek-chat"
 
         generator = main.get_answer_generator()
 
         assert isinstance(generator, LLMAnswerGenerator)
         assert isinstance(generator.llm_client, FakeChatOpenAI)
-        assert generator.llm_client.kwargs["model"] == "deepseek-chat"
+        assert generator.llm_client.kwargs["model"] == "deepseek-answer-model"
         assert generator.llm_client.kwargs["api_key"] == "test-key"
         assert generator.llm_client.kwargs["base_url"] == "https://example.invalid/v1"
         assert generator.llm_client.kwargs["temperature"] == 0.0
     finally:
         config.answer_provider = original_provider
         config.answer_temperature = original_temperature
+        config.answer_model = original_answer_model
         config.deepseek_api_key = original_api_key
         config.deepseek_base_url = original_base_url
-        config.deepseek_model = original_model

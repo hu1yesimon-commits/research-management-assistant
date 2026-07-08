@@ -140,7 +140,7 @@ def test_qa_service_rejects_blank_question(tmp_path):
         raise AssertionError("expected QAServiceError")
 
 
-def test_qa_service_wraps_unexpected_answer_generator_failure(tmp_path):
+def test_qa_service_falls_back_when_answer_generator_fails(tmp_path):
     store = MemoryStore(str(tmp_path / "memory.sqlite3"))
     store.initialize()
     vector_store = FakeVectorStoreService()
@@ -156,14 +156,12 @@ def test_qa_service_wraps_unexpected_answer_generator_failure(tmp_path):
         mode="llm",
     )
 
-    try:
-        service.answer("How do I do graph reconstruction?", top_k=5)
-    except QAServiceError as exc:
-        assert exc.status_code == 502
-        assert exc.detail == "knowledge answer generation failed"
-        assert "secret-token" not in exc.detail
-    else:
-        raise AssertionError("expected QAServiceError")
+    response = service.answer("How do I do graph reconstruction?", top_k=5)
+
+    assert response.mode == "llm-fallback"
+    assert response.sources[0].paper_id == "paper-1"
+    assert "Paper One" in response.answer
+    assert "secret-token" not in response.answer
 
 
 def test_qa_service_uses_supplied_retrieval_results_without_searching():

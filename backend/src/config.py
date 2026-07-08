@@ -41,7 +41,7 @@ class Config:
     embedding_provider: str = "fake"
     bge_m3_model_name: str = "BAAI/bge-m3"
     answer_provider: str = "deterministic"
-    answer_model: str = "gpt-4.1-mini"
+    answer_model: str = "deepseek-chat"
     answer_temperature: float = 0.0
     idea_provider: str = "deterministic"
     idea_model: str = "deepseek-chat"
@@ -89,7 +89,7 @@ config = Config(
     embedding_provider=os.getenv("EMBEDDING_PROVIDER", "fake"),
     bge_m3_model_name=os.getenv("BGE_M3_MODEL_NAME", "BAAI/bge-m3"),
     answer_provider=os.getenv("ANSWER_PROVIDER", "deterministic"),
-    answer_model=os.getenv("ANSWER_MODEL", "gpt-4.1-mini"),
+    answer_model=os.getenv("ANSWER_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
     answer_temperature=float(os.getenv("ANSWER_TEMPERATURE", "0")),
     idea_provider=os.getenv("IDEA_PROVIDER", "deterministic"),
     idea_model=os.getenv("IDEA_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
