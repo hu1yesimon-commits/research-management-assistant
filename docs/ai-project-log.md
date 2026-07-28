@@ -3,12 +3,12 @@
 ## Current snapshot
 
 - Goal: build a stable, bounded research workflow whose natural-language state, routes, retrieval, grounded answers, and user-controlled persistence can be evaluated separately and end to end.
-- Current validated capability: existing offline MVP checks were previously green only under explicit fake/deterministic providers; the newly defined workflow has not yet been implemented or model-evaluated.
-- Current increment: implementation-independent workflow and Gold Scenario v0.
-- Architecture level: strengthened at contracts and evaluation boundaries; unchanged at runtime.
+- Current validated capability: `test` and `offline-dev` now force fake/deterministic providers despite personal `.env` settings; `real-smoke` explicitly permits configured real providers without calling them during ordinary tests.
+- Current increment: explicit runtime-profile isolation and provider configuration switching.
+- Architecture level: strengthened at configuration and evaluation boundaries; unchanged at workflow orchestration.
 - Key constraints: context is not evidence; only retrieved chunks support paper claims; persistent actions require user control; ordinary tests must not inherit personal real-provider settings.
-- Open risks: V3 runtime is not validated against the new contract; Gold labels require human review; evaluator harness and isolated test profile do not yet exist.
-- Next decision: review Gold Scenario v0 labels, then choose evaluator harness or V3 workflow alignment as the next increment.
+- Open risks: real Provider network behavior, timeouts, typed failures, and discovery isolation remain unvalidated; Gold labels still require human review.
+- Next decision: choose one real Provider smoke after its timeout and failure contract is explicit, or return to the evaluator harness.
 - Last updated: 2026-07-28
 
 ## Active assumptions
@@ -19,6 +19,7 @@
 | A-002 | One shared scenario corpus can support component, workflow, and end-to-end evaluation without hiding failure causes. | Implement evaluators for at least state, route, retrieval, and answer scopes. | open |
 | A-003 | Experiment Improvement is the best first vertical workflow for testing summary, preference, retrieval, answer, and fallback boundaries together. | Human label review and first evaluator results. | open |
 | A-004 | One-dimensional time-series classification and localization cases are representative enough for the first domain-focused Gold Set. | User review of scenario realism and missing failure modes. | open |
+| A-005 | Explicit runtime profiles prevent personal real-provider settings from contaminating ordinary tests and offline development. | Profile-switch tests, full backend tests without Provider overrides, and offline smoke. | supported |
 
 ## Decisions
 
@@ -58,6 +59,15 @@
 - Consequences: existing Graph Reconstruction Prompt examples and evaluation fixtures require a separate bias audit before V3 alignment.
 - Revisit when: a distinct cross-domain generalization suite is introduced.
 
+### D-005 — 2026-07-28 — Require explicit real-smoke provider activation
+
+- Context: module-level `.env` loading allowed personal BGE-M3, Chroma, and DeepSeek settings to become the effective default configuration.
+- Options considered: keep exporting offline variables before every test; stop loading `.env`; introduce explicit runtime profiles while preserving local path configuration.
+- Evidence: an isolated config probe observed real Provider selections under the personal `.env`, while explicit offline overrides restored deterministic behavior.
+- Decision: default to `offline-dev`, force automated tests to `test` before application imports, and read real Provider selections and credentials only under `real-smoke`.
+- Consequences: real Provider validation must use a separate smoke; profile selection does not by itself validate external discovery.
+- Revisit when: deployment requires a distinct production configuration contract or a centralized settings system.
+
 ## Delivered increments
 
 ### I-001 — 2026-07-28 — Workflow contract and Gold Scenario v0
@@ -91,3 +101,21 @@
 - Results: all structural checks passed; removed domain terms were absent from case payloads.
 - Known limitations: the V3 `main` snapshot still contains Graph Reconstruction Planner few-shot and evaluation fixtures that need a separate bias correction when aligning runtime.
 - Next candidate increment: user review of time-series scenario realism and missing classification/localization failure modes.
+
+### I-003 — 2026-07-28 — Isolate runtime Provider profiles
+
+- Confirmed scope: configuration isolation and switching only; do not call or stabilize real Providers.
+- Changes:
+  - Added `test`, `offline-dev`, and `real-smoke` runtime profiles.
+  - Added an injectable config loader and offline Provider enforcement.
+  - Forced pytest to select `test` before importing application modules.
+  - Added profile-switch tests, `.env.example`, and updated offline smoke and Provider documentation.
+- Tests executed:
+  - Ruff on the changed Python files.
+  - 79 focused config and Leader tests.
+  - Independent default, test, real-smoke, and invalid-profile process probes.
+  - Full backend suite with the repository's existing `PYTHONPATH=backend/src` entry condition.
+  - Offline MVP smoke without individual Provider overrides.
+- Results: Ruff passed; focused tests passed; profile probes returned the expected configurations; 486 backend tests passed with one existing deprecation warning; offline smoke passed.
+- Known limitations: an initial full-test invocation without `PYTHONPATH=backend/src` failed during collection because of the repository's existing import-path convention; no real network Provider smoke was run.
+- Next candidate increment: define timeout and typed-failure acceptance for one DeepSeek path, then run its isolated `real-smoke`.

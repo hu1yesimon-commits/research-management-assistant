@@ -2,7 +2,7 @@
 
 当前仓库已经进入 feature-freeze / interview-polish 收敛状态。已落地的是一个本地优先的 Research Management Assistant MVP：`FastAPI + LangGraph + SQLite` 后端、Vue 3 + Vite Research Workbench、bounded synchronous Agent Team V3、deterministic Idea Assistant MVP、以及 review-gated Memory System MVP。
 
-本文档只同步已经完成的事实。默认路径保持 deterministic/offline，不依赖 DeepSeek、OpenAI、BGE-M3、Chroma、arXiv、OpenAlex 或外网；这些真实 provider / 外部源路径都是显式配置后的 optional smoke。`Advanced-lite` 目前是 deterministic query rewrite，不是真实 LLM / RAG research agent。
+本文档只同步已经完成的事实。默认开发和自动化测试保持 deterministic/offline；真实 LLM、embedding 和 vector 服务只在显式 `real-smoke` profile 下逐项验证，外部 discovery 则由工作流显式请求并单独验收。真实服务的接入状态、已知接口风险与逐项验收条件见 [provider rollout register](docs/superpowers/reviews/2026-07-12-provider-rollout-register.md)。`Advanced-lite` 目前仍是 deterministic query rewrite，不是真实 LLM / RAG research agent。
 
 ## Interview Snapshot
 
@@ -15,7 +15,7 @@ Implemented and demo-ready:
 - Idea Assistant MVP: structured experiment log in, retrieval-backed evidence lookup, deterministic 3-5 idea options out.
 - Memory System MVP: structured logs as episodic evidence, deterministic `semantic_proposal` candidates, user accept/reject review, confirmed semantic memory, and explicit archive.
 
-Default deterministic boundaries:
+Offline provider set:
 
 - `PAPER_JUDGE_PROVIDER=mock`
 - `EMBEDDING_PROVIDER=fake`
@@ -23,12 +23,21 @@ Default deterministic boundaries:
 - `ANSWER_PROVIDER=deterministic`
 - `IDEA_PROVIDER=deterministic`
 
-Optional real providers:
+Optional real providers (must pass the rollout register before being treated as stable):
 
-- `PAPER_JUDGE_PROVIDER=deepseek` for manual paper-judge smoke.
-- `ANSWER_PROVIDER=openai` or `ANSWER_PROVIDER=deepseek` for manual grounded-answer smoke.
-- `EMBEDDING_PROVIDER=bge-m3` plus `VECTOR_BACKEND=chroma` for local real embedding/vector smoke.
-- arXiv/OpenAlex discovery paths are live external integrations and can be affected by network, API, and rate-limit behavior.
+- `PAPER_JUDGE_PROVIDER=deepseek` for paper judging.
+- `ANSWER_PROVIDER=openai` or `ANSWER_PROVIDER=deepseek` for grounded answers.
+- `LEADER_RESPONSE_PROVIDER=deepseek` for natural-language turn summaries; offline profiles keep the deterministic responder.
+- `EMBEDDING_PROVIDER=bge-m3` plus `VECTOR_BACKEND=chroma` for persistent local semantic retrieval.
+- arXiv/OpenAlex for external discovery and metadata enrichment.
+
+Runtime profiles:
+
+- `RUNTIME_PROFILE=test`: automated tests force fake/deterministic providers before application modules are imported.
+- `RUNTIME_PROFILE=offline-dev`: default local-development mode; personal `.env` provider selections and credentials do not enable real providers.
+- `RUNTIME_PROFILE=real-smoke`: explicitly permits configured real providers and credentials. It does not imply that every provider is enabled or has passed its smoke.
+
+The provider profile controls provider construction. External discovery remains an explicit workflow input and has separate smoke and failure-handling requirements.
 
 ## Current Scope
 
@@ -96,9 +105,9 @@ Optional real providers:
 - `POST /knowledge/search`
   输入 `{"query":"...","top_k":5}`，对已 `embedded` 的知识块执行 retrieval MVP，返回 chunk / paper 信息；当前只做召回，不做 RAG answer generation 或 LLM 总结
 - `POST /knowledge/answer`
-  输入 `{"question":"...","top_k":5}`，基于 retrieval 结果返回 grounded answer MVP；当前默认使用 deterministic fake answer generator，不调用真实 LLM
+  输入 `{"question":"...","top_k":5}`，基于 retrieval 结果返回 grounded answer；真实 LLM 由 `ANSWER_PROVIDER` 配置，deterministic generator 仅用于测试/兜底
 - `POST /ideas/recommend`
-  输入一条结构化实验日志，构造 retrieval query，检索本地已 `embedded` 的知识块，并返回 3-5 条结构化 idea options；默认 deterministic/offline，不默认调用真实 provider 或外部 discovery
+  输入一条结构化实验日志，构造 retrieval query，检索本地已 `embedded` 的知识块，并返回 3-5 条结构化 idea options；当前 idea generator 仍为 deterministic，实现真实生成器前不应将其宣传为 LLM idea agent
 - `POST /research/query`
   输入 `{"query":"...","mode":"basic"|"advanced","include_discovery":true,"include_knowledge":true,"top_k":5}`，把外部 discovery 和内部 knowledge answer 编排到一个响应中；`discovery.candidates` 不是 grounded answer sources，`knowledge.sources` 只来自已 `embedded` 的知识块
 - `POST /research/assistant`
@@ -174,11 +183,12 @@ Optional real providers:
 - `GET /experiments/logs` 列出结构化实验日志
 - `POST /ideas/recommend` 基于单条结构化日志构造 retrieval query，检索本地已 `embedded` 的知识块，并返回 3-5 条结构化 idea options
 
-默认行为保持 deterministic 和 offline。默认测试路径不会真实调用 DeepSeek、OpenAI、BGE-M3、Chroma、arXiv 或 OpenAlex；这些真实 provider / 外部源路径如果将来需要启用，应走显式配置和单独的手动 smoke。
+默认行为保持 deterministic 和 offline。自动化测试在导入应用代码前强制设置 `RUNTIME_PROFILE=test`；普通本地运行默认使用 `offline-dev`。DeepSeek、OpenAI、BGE-M3 和 Chroma 只有在显式 `real-smoke` profile 下才会读取真实 Provider 配置。arXiv/OpenAlex 外部 discovery 仍由工作流输入控制，应使用独立 smoke。
 
 如果要演示 Agent Team V3 的真实 Knowledge QA 路径，请显式切到 demo 环境，而不是修改默认离线配置：
 
 ```bash
+export RUNTIME_PROFILE=real-smoke
 export VECTOR_BACKEND=chroma
 export EMBEDDING_PROVIDER=bge-m3
 export CHROMA_PERSIST_DIR=backend/data/vector_store/chroma

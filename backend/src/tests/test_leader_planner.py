@@ -993,7 +993,7 @@ def test_agent_team_config_defaults_are_bounded_and_offline():
     configured = Config()
 
     assert configured.leader_provider == "deterministic"
-    assert configured.leader_response_provider == "deepseek"
+    assert configured.leader_response_provider == "deterministic"
     assert configured.leader_model == "deepseek-chat"
     assert configured.leader_response_model == "deepseek-chat"
     assert configured.leader_response_temperature == 0.2
