@@ -1,14 +1,31 @@
-from dotenv import load_dotenv
-load_dotenv()
-
 import os
 from dataclasses import dataclass
+from typing import Mapping
+
+from dotenv import load_dotenv
 
 from agent_team.providers import validate_provider_name
+
+load_dotenv()
+
+
+SUPPORTED_RUNTIME_PROFILES = frozenset({"test", "offline-dev", "real-smoke"})
+DEFAULT_RUNTIME_PROFILE = "offline-dev"
+
+
+def validate_runtime_profile(profile: str) -> str:
+    if profile not in SUPPORTED_RUNTIME_PROFILES:
+        supported = ", ".join(sorted(SUPPORTED_RUNTIME_PROFILES))
+        raise ValueError(
+            f"Unsupported runtime profile {profile!r}; expected one of: {supported}"
+        )
+    return profile
 
 
 @dataclass
 class Config:
+    runtime_profile: str = DEFAULT_RUNTIME_PROFILE
+
     # arXiv
     arxiv_enabled: bool = True
     arxiv_rate_limit: float = 3.0
@@ -49,7 +66,7 @@ class Config:
     leader_provider: str = "deterministic"
     leader_model: str = "deepseek-chat"
     leader_temperature: float = 0.0
-    leader_response_provider: str = "deepseek"
+    leader_response_provider: str = "deterministic"
     leader_response_model: str = "deepseek-chat"
     leader_response_temperature: float = 0.2
     summary_provider: str = "deterministic"
@@ -62,51 +79,97 @@ class Config:
     deepseek_model: str = "deepseek-chat"
 
     def __post_init__(self):
+        self.runtime_profile = validate_runtime_profile(self.runtime_profile)
         self.leader_provider = validate_provider_name(self.leader_provider)
-        self.leader_response_provider = validate_provider_name(self.leader_response_provider)
+        self.leader_response_provider = validate_provider_name(
+            self.leader_response_provider
+        )
         self.summary_provider = validate_provider_name(self.summary_provider)
 
-config = Config(
-    arxiv_max_results=int(os.getenv("ARXIV_MAX_RESULTS", "10")),
-    arxiv_rate_limit=float(os.getenv("ARXIV_RATE_LIMIT_SECONDS", "3.0")),
-    arxiv_sort_by=os.getenv("ARXIV_SORT_BY", "submittedDate"),
-    arxiv_sort_order=os.getenv("ARXIV_SORT_ORDER", "descending"),
 
-    openalex_api_key=os.getenv("OPENALEX_API_KEY", ""),
-    openalex_mailto=os.getenv("OPENALEX_MAILTO", ""),
-    openalex_rate_limit=float(os.getenv("OPENALEX_RATE_LIMIT_SECONDS", "1.0")),
-    openalex_max_results=int(os.getenv("OPENALEX_MAX_RESULTS", "10")),
+def load_config(env: Mapping[str, str] | None = None) -> Config:
+    source = os.environ if env is None else env
+    runtime_profile = validate_runtime_profile(
+        source.get("RUNTIME_PROFILE", DEFAULT_RUNTIME_PROFILE)
+    )
+    real_providers_enabled = runtime_profile == "real-smoke"
 
-    semantic_scholar_api_key=os.getenv("SEMANTIC_SCHOLAR_API_KEY", ""),
-    semantic_scholar_rate_limit=float(os.getenv("SEMANTIC_SCHOLAR_RATE_LIMIT_SECONDS", "1.0")),
+    def provider_setting(name: str, offline_default: str) -> str:
+        if not real_providers_enabled:
+            return offline_default
+        return source.get(name, offline_default)
 
-    database_path=os.getenv("DATABASE_PATH", "backend/data/research_memory.sqlite3"),
-    pdf_upload_dir=os.getenv("PDF_UPLOAD_DIR", "backend/data/uploads"),
-    vector_store_dir=os.getenv("VECTOR_STORE_DIR", "backend/data/vector_store"),
-    vector_backend=os.getenv("VECTOR_BACKEND", "fake"),
-    chroma_persist_dir=os.getenv("CHROMA_PERSIST_DIR", "backend/data/vector_store/chroma"),
-    chroma_collection_name=os.getenv("CHROMA_COLLECTION_NAME", "research_chunks"),
-    embedding_provider=os.getenv("EMBEDDING_PROVIDER", "fake"),
-    bge_m3_model_name=os.getenv("BGE_M3_MODEL_NAME", "BAAI/bge-m3"),
-    answer_provider=os.getenv("ANSWER_PROVIDER", "deterministic"),
-    answer_model=os.getenv("ANSWER_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
-    answer_temperature=float(os.getenv("ANSWER_TEMPERATURE", "0")),
-    idea_provider=os.getenv("IDEA_PROVIDER", "deterministic"),
-    idea_model=os.getenv("IDEA_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
-    idea_temperature=float(os.getenv("IDEA_TEMPERATURE", "0")),
-    leader_provider=os.getenv("LEADER_PROVIDER", "deterministic"),
-    leader_model=os.getenv("LEADER_MODEL", "deepseek-chat"),
-    leader_temperature=float(os.getenv("LEADER_TEMPERATURE", "0")),
-    leader_response_provider=os.getenv("LEADER_RESPONSE_PROVIDER", "deepseek"),
-    leader_response_model=os.getenv("LEADER_RESPONSE_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
-    leader_response_temperature=float(os.getenv("LEADER_RESPONSE_TEMPERATURE", "0.2")),
-    summary_provider=os.getenv("SUMMARY_PROVIDER", "deterministic"),
-    agent_step_timeout_seconds=float(os.getenv("AGENT_STEP_TIMEOUT_SECONDS", "120")),
-    turn_timeout_seconds=float(os.getenv("TURN_TIMEOUT_SECONDS", "240")),
-    paper_judge_provider=os.getenv("PAPER_JUDGE_PROVIDER", "mock"),
-    paper_judge_model=os.getenv("PAPER_JUDGE_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
-    deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-    deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", ""),
-    deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+    return Config(
+        runtime_profile=runtime_profile,
+        arxiv_max_results=int(source.get("ARXIV_MAX_RESULTS", "10")),
+        arxiv_rate_limit=float(source.get("ARXIV_RATE_LIMIT_SECONDS", "3.0")),
+        arxiv_sort_by=source.get("ARXIV_SORT_BY", "submittedDate"),
+        arxiv_sort_order=source.get("ARXIV_SORT_ORDER", "descending"),
+        openalex_api_key=(
+            source.get("OPENALEX_API_KEY", "") if real_providers_enabled else ""
+        ),
+        openalex_mailto=source.get("OPENALEX_MAILTO", ""),
+        openalex_rate_limit=float(source.get("OPENALEX_RATE_LIMIT_SECONDS", "1.0")),
+        openalex_max_results=int(source.get("OPENALEX_MAX_RESULTS", "10")),
+        semantic_scholar_api_key=(
+            source.get("SEMANTIC_SCHOLAR_API_KEY", "") if real_providers_enabled else ""
+        ),
+        semantic_scholar_rate_limit=float(
+            source.get("SEMANTIC_SCHOLAR_RATE_LIMIT_SECONDS", "1.0")
+        ),
+        database_path=source.get(
+            "DATABASE_PATH", "backend/data/research_memory.sqlite3"
+        ),
+        pdf_upload_dir=source.get("PDF_UPLOAD_DIR", "backend/data/uploads"),
+        vector_store_dir=source.get("VECTOR_STORE_DIR", "backend/data/vector_store"),
+        vector_backend=provider_setting("VECTOR_BACKEND", "fake"),
+        chroma_persist_dir=source.get(
+            "CHROMA_PERSIST_DIR", "backend/data/vector_store/chroma"
+        ),
+        chroma_collection_name=source.get("CHROMA_COLLECTION_NAME", "research_chunks"),
+        embedding_provider=provider_setting("EMBEDDING_PROVIDER", "fake"),
+        bge_m3_model_name=source.get("BGE_M3_MODEL_NAME", "BAAI/bge-m3"),
+        answer_provider=provider_setting("ANSWER_PROVIDER", "deterministic"),
+        answer_model=source.get(
+            "ANSWER_MODEL", source.get("DEEPSEEK_MODEL", "deepseek-chat")
+        ),
+        answer_temperature=float(source.get("ANSWER_TEMPERATURE", "0")),
+        idea_provider=provider_setting("IDEA_PROVIDER", "deterministic"),
+        idea_model=source.get(
+            "IDEA_MODEL", source.get("DEEPSEEK_MODEL", "deepseek-chat")
+        ),
+        idea_temperature=float(source.get("IDEA_TEMPERATURE", "0")),
+        leader_provider=provider_setting("LEADER_PROVIDER", "deterministic"),
+        leader_model=source.get("LEADER_MODEL", "deepseek-chat"),
+        leader_temperature=float(source.get("LEADER_TEMPERATURE", "0")),
+        leader_response_provider=provider_setting(
+            "LEADER_RESPONSE_PROVIDER", "deterministic"
+        ),
+        leader_response_model=source.get(
+            "LEADER_RESPONSE_MODEL",
+            source.get("DEEPSEEK_MODEL", "deepseek-chat"),
+        ),
+        leader_response_temperature=float(
+            source.get("LEADER_RESPONSE_TEMPERATURE", "0.2")
+        ),
+        summary_provider=provider_setting("SUMMARY_PROVIDER", "deterministic"),
+        agent_step_timeout_seconds=float(
+            source.get("AGENT_STEP_TIMEOUT_SECONDS", "120")
+        ),
+        turn_timeout_seconds=float(source.get("TURN_TIMEOUT_SECONDS", "240")),
+        paper_judge_provider=provider_setting("PAPER_JUDGE_PROVIDER", "mock"),
+        paper_judge_model=source.get(
+            "PAPER_JUDGE_MODEL",
+            source.get("DEEPSEEK_MODEL", "deepseek-chat"),
+        ),
+        deepseek_api_key=(
+            source.get("DEEPSEEK_API_KEY", "") if real_providers_enabled else ""
+        ),
+        deepseek_base_url=(
+            source.get("DEEPSEEK_BASE_URL", "") if real_providers_enabled else ""
+        ),
+        deepseek_model=source.get("DEEPSEEK_MODEL", "deepseek-chat"),
+    )
 
-)
+
+config = load_config()

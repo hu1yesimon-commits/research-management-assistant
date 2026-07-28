@@ -6,11 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 export PYTHONPATH="backend/src"
-export PAPER_JUDGE_PROVIDER="mock"
-export EMBEDDING_PROVIDER="fake"
-export VECTOR_BACKEND="fake"
-export ANSWER_PROVIDER="deterministic"
-export IDEA_PROVIDER="deterministic"
+export RUNTIME_PROFILE="offline-dev"
 
 ./.venv/bin/python - <<'PY'
 import os
@@ -24,11 +20,6 @@ sys.path.insert(0, str(ROOT_DIR / "backend" / "src"))
 with tempfile.TemporaryDirectory(prefix="graphreconstruction-offline-smoke-") as tmp_dir:
     os.environ["DATABASE_PATH"] = str(Path(tmp_dir) / "research_memory.sqlite3")
     os.environ["PDF_UPLOAD_DIR"] = str(Path(tmp_dir) / "uploads")
-    os.environ["PAPER_JUDGE_PROVIDER"] = "mock"
-    os.environ["EMBEDDING_PROVIDER"] = "fake"
-    os.environ["VECTOR_BACKEND"] = "fake"
-    os.environ["ANSWER_PROVIDER"] = "deterministic"
-    os.environ["IDEA_PROVIDER"] = "deterministic"
 
     from fastapi.testclient import TestClient
 

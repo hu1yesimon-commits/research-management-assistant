@@ -1,9 +1,20 @@
 # Provider rollout register
 
-日期：2026-07-12  
-决策：产品运行以真实 provider 为目标；fake/deterministic 仅作为测试 profile、演示兜底和故障诊断工具。
+日期：2026-07-12
+更新：2026-07-28
+决策：自动化测试和默认开发保持 offline；真实 provider 仅在显式 `real-smoke` profile 下逐项验证。
 
 本文件不是“已可用”声明。任何服务只有通过对应 smoke、失败降级和可观测性验收后，才能被标为稳定。
+
+## Runtime profiles
+
+| Profile | 用途 | Provider 选择 |
+| --- | --- | --- |
+| `test` | 自动化测试 | 强制 fake/deterministic，不继承个人 `.env` 的真实 Provider 配置或凭据 |
+| `offline-dev` | 默认本地开发、固定样本和 UI 调试 | 强制 fake/deterministic；仍允许独立配置数据库和本地文件路径 |
+| `real-smoke` | 单项真实 Provider 验证 | 允许读取显式 Provider、模型和凭据配置；不代表所有服务均已启用或稳定 |
+
+Profile 只约束 Provider 构造。arXiv/OpenAlex 外部 discovery 仍由工作流输入控制，必须使用独立 smoke 验证。
 
 ## 当前接入与待验证项
 
@@ -11,7 +22,7 @@
 | --- | --- | --- | --- |
 | DeepSeek Judge | `ChatOpenAI` + `DEEPSEEK_BASE_URL` / key | 依赖 OpenAI-compatible 协议、模型名、密钥和网络；单篇 judge 失败会降级，需确认降级在 UI 可见 | 有效/无效 key、429、超时、格式异常各一条真实 smoke；记录 request id、延迟、模型名 |
 | DeepSeek Answer | `ANSWER_PROVIDER=deepseek` | 当前没有流式输出；provider 故障必须和“本地没有证据”区别展示 | 以 embedded 文献跑 grounded-answer 真实 smoke；核验 source 引用未被模型伪造；失败返回 typed error |
-| DeepSeek Leader response | `LEADER_RESPONSE_PROVIDER=deepseek`，代码默认值为 deepseek | 当前失败后会 deterministic fallback；如果无 timeout，调用可能拖住整条同步 turn | 检查 key/base URL/model；设定 connect/read timeout；UI 显示 fallback/provider failure；测超时返回 |
+| DeepSeek Leader response | `RUNTIME_PROFILE=real-smoke` + `LEADER_RESPONSE_PROVIDER=deepseek` | 当前失败后会 deterministic fallback；如果无 timeout，调用可能拖住整条同步 turn | 检查 key/base URL/model；设定 connect/read timeout；UI 显示 fallback/provider failure；测超时返回 |
 | OpenAI Answer | `ANSWER_PROVIDER=openai` | 依赖运行环境的 OpenAI credentials；代码未提供独立预检或成本控制 | 明确 API key 来源、模型白名单、成本上限与真实 smoke |
 | BGE-M3 | `SentenceTransformer(BAAI/bge-m3)` | 首次下载/模型缓存/CPU 内存与启动时间；模型加载失败会让请求失败 | 固定模型版本与本地缓存策略；用真实 PDF 测 embed、重启后查询和耗时 |
 | Chroma | `PersistentClient(CHROMA_PERSIST_DIR)` | SQLite 的 `vector_ref` 与 Chroma 目录/collection 必须一致；目录误切换会造成“已 embedded 但查不到” | 重启后检索 smoke；collection/schema 版本记录；清理/重建流程；磁盘容量告警 |
@@ -22,7 +33,7 @@
 
 每个真实 provider 在正式启用前必须满足：
 
-1. 明确环境变量、模型名、base URL 与启动预检；不得靠隐式 shell 状态猜测。
+1. 必须显式使用 `RUNTIME_PROFILE=real-smoke`，并明确环境变量、模型名、base URL 与启动预检；不得靠隐式 shell 状态猜测。
 2. 有独立的真实 smoke，不与普通 pytest 混跑。
 3. 有 connect/read timeout、可恢复错误类型和用户可见的降级说明。
 4. 记录 provider、model、duration、fallback 与错误类别；不记录密钥或完整敏感 payload。
@@ -30,7 +41,7 @@
 
 ## 当前阻塞顺序
 
-1. 先修复同步 timeout 的真实 deadline 语义，再把 Leader/Answer 作为默认真实调用。
-2. 建立 `real` 与 `test` 两套显式 profile；test profile 强制 fake/deterministic，real profile 启动时预检全部配置。
+1. 建立 `test`、`offline-dev`、`real-smoke` 三套显式 profile，先消除个人 `.env` 对普通测试和默认开发的污染。
+2. 修复同步 timeout 的真实 deadline 语义，再扩大 Leader/Answer 的真实调用范围。
 3. 为 DeepSeek Leader、Answer、BGE-M3 + Chroma、arXiv/OpenAlex 逐项跑 smoke 并记录结果。
 4. 通过后再改 UI 文案为“已接入稳定服务”，否则只称“已接入、待验收”。
