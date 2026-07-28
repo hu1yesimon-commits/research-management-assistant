@@ -225,3 +225,34 @@ def test_idea_recommendation_service_continues_when_discovery_fails(tmp_path):
     assert response.discovery.error == "discovery offline"
     assert response.discovery.candidates == []
     assert len(response.ideas) == 3
+
+
+def test_explicit_discovery_candidates_take_precedence_without_invoking_graph(tmp_path):
+    class UnexpectedDiscoveryGraph:
+        def invoke(self, payload):
+            raise AssertionError("Idea must not run fresh discovery for supplied evidence")
+
+    store = MemoryStore(str(tmp_path / "memory.sqlite3"))
+    store.initialize()
+    service = IdeaRecommendationService(
+        store=store,
+        retrieval_service=KnowledgeRetrievalService(
+            store=store,
+            embedding_service=FakeEmbeddingService(),
+            vector_store_service=FakeVectorStoreService(),
+        ),
+        idea_generator=DeterministicIdeaGenerator(),
+        discovery_graph=UnexpectedDiscoveryGraph(),
+        mode="deterministic",
+    )
+    supplied = [{"paper": {"paper_id": "research-paper"}}]
+
+    response = service.recommend(
+        experiment_log=make_log(),
+        save_log=False,
+        include_discovery=True,
+        discovery_candidates=supplied,
+    )
+
+    assert response.discovery.enabled is True
+    assert response.discovery.candidates == supplied

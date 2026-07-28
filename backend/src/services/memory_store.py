@@ -4,6 +4,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 
 from services.schemas import JudgeResult, PaperMetadata
+from services.sqlite_migrations import apply_migrations
 
 """
 2026-06-07 更新：
@@ -127,6 +128,8 @@ class MemoryStore:
                 );
                 """
             )
+
+        apply_migrations(self.database_path)
 
     def add_experiment_log(self, content: str, tags: list[str] | None = None) -> int:
         now = self._now()
@@ -263,6 +266,17 @@ class MemoryStore:
                 f"tags={tags}"
             )
 
+        return "\n".join(lines)
+
+    def build_confirmed_memory_context(self) -> str:
+        lines = ["Confirmed semantic memory:"]
+        for memory in self.list_semantic_memory(status="confirmed"):
+            lines.append(
+                "- "
+                f"[{memory['category']}/{memory['predicate']}] "
+                f"{memory['subject']} {memory['predicate']} {memory['object']}: "
+                f"{memory['summary']}"
+            )
         return "\n".join(lines)
 
     def upsert_memory_candidate(self, candidate: dict) -> int:
@@ -615,7 +629,7 @@ class MemoryStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO papers (
+                INSERT INTO papers (
                     paper_id,
                     title,
                     doi,
@@ -629,6 +643,17 @@ class MemoryStore:
                     updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(paper_id) DO UPDATE SET
+                    title = excluded.title,
+                    doi = excluded.doi,
+                    source = excluded.source,
+                    abstract = excluded.abstract,
+                    authors_json = excluded.authors_json,
+                    metadata_json = excluded.metadata_json,
+                    status = excluded.status,
+                    pdf_path = excluded.pdf_path,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
                 """,
                 (
                     paper.paper_id,
@@ -747,6 +772,17 @@ class MemoryStore:
 
         return candidates
 
+    def count_candidate_papers(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS paper_count
+                FROM papers
+                """
+            ).fetchone()
+
+        return int(row["paper_count"])
+
     def get_paper(self, paper_id: str) -> dict | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -786,6 +822,47 @@ class MemoryStore:
             "updated_at": row["updated_at"],
         }
 
+    def list_saved_papers(self, limit: int = 100) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    paper_id,
+                    title,
+                    doi,
+                    source,
+                    abstract,
+                    authors_json,
+                    metadata_json,
+                    status,
+                    pdf_path,
+                    created_at,
+                    updated_at
+                FROM papers
+                WHERE status IN ('accepted', 'uploaded', 'chunked', 'embedded')
+                ORDER BY updated_at DESC, paper_id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            {
+                "paper_id": row["paper_id"],
+                "title": row["title"],
+                "doi": row["doi"],
+                "source": row["source"],
+                "abstract": row["abstract"],
+                "authors": self._from_json(row["authors_json"]),
+                "metadata": self._from_json(row["metadata_json"]),
+                "status": row["status"],
+                "pdf_path": row["pdf_path"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     def update_paper_status(self, paper_id: str, status: str, pdf_path: str | None = None) -> None:
         existing = self._get_existing_paper(paper_id)
         if existing is None:
@@ -809,7 +886,7 @@ class MemoryStore:
                 """
                 SELECT DISTINCT doi
                 FROM papers
-                WHERE status IN ('uploaded', 'chunked', 'embedded')
+                WHERE status IN ('accepted', 'uploaded', 'chunked', 'embedded')
                   AND doi IS NOT NULL
                   AND doi != ''
                 ORDER BY doi ASC
@@ -976,8 +1053,10 @@ class MemoryStore:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(self.database_path, timeout=5.0)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 5000")
         return connection
 
     def _get_existing_paper(self, paper_id: str) -> sqlite3.Row | None:

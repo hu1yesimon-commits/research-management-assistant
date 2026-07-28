@@ -128,6 +128,7 @@ class IdeaRecommendationService:
         include_discovery: bool = False,
         top_k: int = 5,
         idea_count: int = 3,
+        discovery_candidates: list[dict] | None = None,
     ) -> IdeaRecommendResponse:
         query = self.build_query(experiment_log)
         if not query:
@@ -159,25 +160,15 @@ class IdeaRecommendationService:
             knowledge_error = exc.detail
             raise IdeaServiceError(exc.detail, status_code=exc.status_code) from exc
 
-        discovery = IdeaDiscoverySection(enabled=include_discovery, candidates=[], error=None)
-        if include_discovery and self.discovery_graph is not None:
-            try:
-                discovery_result = self.discovery_graph.invoke(
-                    {
-                        "mode": "basic",
-                        "user_query": query,
-                        "memory_context": "",
-                        "rewritten_queries": [],
-                        "raw_results": [],
-                        "normalized_papers": [],
-                        "deduped_papers": [],
-                        "judge_results": [],
-                        "ranked_candidates": [],
-                    }
-                )
-                discovery.candidates = discovery_result["ranked_candidates"][:top_k]
-            except Exception as exc:
-                discovery.error = str(exc)
+        candidates = list(discovery_candidates or [])
+        discovery_error = None
+        if discovery_candidates is None and include_discovery and self.discovery_graph is not None:
+            candidates, discovery_error = self._legacy_discovery(query, top_k)
+        discovery = IdeaDiscoverySection(
+            enabled=include_discovery or bool(candidates),
+            candidates=candidates,
+            error=discovery_error,
+        )
 
         ideas = self.idea_generator.generate(
             experiment_log=experiment_log,
@@ -194,6 +185,25 @@ class IdeaRecommendationService:
             ideas=ideas,
             mode=self.mode,
         )
+
+    def _legacy_discovery(self, query: str, top_k: int) -> tuple[list[dict], str | None]:
+        try:
+            discovery_result = self.discovery_graph.invoke(
+                {
+                    "mode": "basic",
+                    "user_query": query,
+                    "memory_context": "",
+                    "rewritten_queries": [],
+                    "raw_results": [],
+                    "normalized_papers": [],
+                    "deduped_papers": [],
+                    "judge_results": [],
+                    "ranked_candidates": [],
+                }
+            )
+            return discovery_result["ranked_candidates"][:top_k], None
+        except Exception as exc:
+            return [], str(exc)
 
     def build_query(self, experiment_log: ExperimentLogRequest) -> str:
         parts = [

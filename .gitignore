@@ -22,8 +22,10 @@ backend/data/
 # Test/cache artifacts
 .pytest_cache/
 __pycache__/
+node_modules/
 frontend/node_modules/
 frontend/dist/
+.superpowers/
 
 # Local worktree directories
 .worktrees/

@@ -4,9 +4,20 @@ from fastapi import Body, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 
+from agent_team.dispatcher import DirectAgentDispatcher
+from agent_team.idea_agent import IdeaAgent
+from agent_team.providers import build_leader_planner, build_leader_responder, build_summary_generator
+from agent_team.research_agent import ResearchAgent
+from agent_team.validator import PlanValidator
 from config import config
 from graph.builder import build_paper_discovery_graph
 from services.answer_service import AnswerGenerator, FakeGroundedAnswerGenerator, LLMAnswerGenerator, PromptBuilder
+from services.candidate_lifecycle import (
+    CandidateExpiredError,
+    CandidateLifecycleService,
+    CandidateNotFoundError,
+)
+from services.conversation_service import ConversationService
 from services.embedding_pipeline import EmbeddingPipelineError, EmbeddingPipelineService
 from services.embedding_service import BgeM3EmbeddingService, EmbeddingService, FakeEmbeddingService
 from services.idea_service import DeterministicIdeaGenerator, IdeaGenerator, IdeaRecommendationService, IdeaServiceError
@@ -19,6 +30,16 @@ from services.qa_service import KnowledgeQAService, QAServiceError
 from services.research_assistant_workflow import ResearchAssistantWorkflowError, ResearchAssistantWorkflowService
 from services.research_workflow import ResearchWorkflowError, ResearchWorkflowService
 from services.retrieval_service import KnowledgeRetrievalService, RetrievalServiceError
+from services.session_context import SessionContextBuilder, SessionSummaryService
+from services.session_schemas import (
+    CandidateAcceptResponse,
+    MessagePage,
+    SavedPaper,
+    SessionCandidate,
+    SessionTurnRequest,
+    SessionTurnResponse,
+)
+from services.session_store import SessionBusyError, SessionStore
 from services.schemas import (
     AcceptPaperRequest,
     ExperimentLogCreateResponse,
@@ -85,14 +106,28 @@ def reset_embedding_service_cache() -> None:
     _get_cached_embedding_service.cache_clear()
 
 
-def get_memory_store(database_path: str | None = None) -> MemoryStore:
-    store = MemoryStore(database_path or config.database_path)
+def create_memory_store(database_path: str) -> MemoryStore:
+    store = MemoryStore(database_path)
     store.initialize()
     return store
 
 
+def get_memory_store() -> MemoryStore:
+    return create_memory_store(config.database_path)
+
+
 def get_memory_service(store: MemoryStore = Depends(get_memory_store)) -> MemoryService:
     return MemoryService(store=store, extractor=MemoryExtractor())
+
+
+def get_session_store() -> SessionStore:
+    MemoryStore(config.database_path).initialize()
+    return SessionStore(config.database_path)
+
+
+def get_candidate_lifecycle_service() -> CandidateLifecycleService:
+    MemoryStore(config.database_path).initialize()
+    return CandidateLifecycleService(config.database_path)
 
 
 def get_paper_judge() -> LLMJudge:
@@ -156,7 +191,7 @@ def get_answer_generator() -> AnswerGenerator:
     if config.answer_provider == "deepseek":
         return LLMAnswerGenerator(
             llm_client=ChatOpenAI(
-                model=config.deepseek_model,
+                model=config.answer_model,
                 temperature=config.answer_temperature,
                 api_key=config.deepseek_api_key,
                 base_url=config.deepseek_base_url,
@@ -264,9 +299,163 @@ def get_research_assistant_workflow_service(
     )
 
 
+def get_session_context_builder(
+    session_store: SessionStore = Depends(get_session_store),
+    memory_store: MemoryStore = Depends(get_memory_store),
+) -> SessionContextBuilder:
+    return SessionContextBuilder(session_store=session_store, memory_store=memory_store)
+
+
+def get_session_summary_service(
+    session_store: SessionStore = Depends(get_session_store),
+) -> SessionSummaryService:
+    return SessionSummaryService(
+        session_store=session_store,
+        generator=build_summary_generator(config),
+    )
+
+
+def get_leader_planner():
+    return build_leader_planner(config)
+
+
+def get_leader_responder():
+    return build_leader_responder(config)
+
+
+def get_research_agent(
+    discovery_graph=Depends(get_paper_discovery_graph),
+    candidate_service: CandidateLifecycleService = Depends(get_candidate_lifecycle_service),
+) -> ResearchAgent:
+    return ResearchAgent(
+        discovery_graph=discovery_graph,
+        candidate_service=candidate_service,
+    )
+
+
+def get_idea_agent(
+    idea_service: IdeaRecommendationService = Depends(get_idea_recommendation_service),
+) -> IdeaAgent:
+    return IdeaAgent(idea_service=idea_service)
+
+
+def get_direct_agent_dispatcher(
+    knowledge_service: KnowledgeQAService = Depends(get_knowledge_qa_service),
+    research_agent: ResearchAgent = Depends(get_research_agent),
+    idea_agent: IdeaAgent = Depends(get_idea_agent),
+    session_store: SessionStore = Depends(get_session_store),
+) -> DirectAgentDispatcher:
+    return DirectAgentDispatcher(
+        knowledge_service=knowledge_service,
+        research_agent=research_agent,
+        idea_agent=idea_agent,
+        session_store=session_store,
+        agent_step_timeout_seconds=config.agent_step_timeout_seconds,
+    )
+
+
+def get_conversation_service(
+    session_store: SessionStore = Depends(get_session_store),
+    candidate_service: CandidateLifecycleService = Depends(get_candidate_lifecycle_service),
+    context_builder: SessionContextBuilder = Depends(get_session_context_builder),
+    knowledge_retrieval: KnowledgeRetrievalService = Depends(get_knowledge_retrieval_service),
+    planner=Depends(get_leader_planner),
+    dispatcher: DirectAgentDispatcher = Depends(get_direct_agent_dispatcher),
+    responder=Depends(get_leader_responder),
+    summary_service: SessionSummaryService = Depends(get_session_summary_service),
+) -> ConversationService:
+    return ConversationService(
+        store=session_store,
+        candidate_service=candidate_service,
+        context_builder=context_builder,
+        knowledge_retrieval=knowledge_retrieval,
+        planner=planner,
+        validator=PlanValidator(),
+        dispatcher=dispatcher,
+        responder=responder,
+        summary_service=summary_service,
+        turn_timeout_seconds=config.turn_timeout_seconds,
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def _require_default_session(session_id: str) -> None:
+    if session_id != "default":
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+@app.post("/sessions/{session_id}/turns", response_model=SessionTurnResponse)
+def create_session_turn(
+    session_id: str,
+    request: SessionTurnRequest,
+    service: ConversationService = Depends(get_conversation_service),
+):
+    _require_default_session(session_id)
+    try:
+        return service.run(session_id, request)
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/sessions/{session_id}/messages", response_model=MessagePage)
+def list_session_messages(
+    session_id: str,
+    before_id: int | None = None,
+    limit: int = 50,
+    store: SessionStore = Depends(get_session_store),
+):
+    _require_default_session(session_id)
+    bounded_limit = min(max(limit, 1), 100)
+    messages = store.list_messages(
+        session_id,
+        before_id=before_id,
+        limit=bounded_limit + 1,
+    )
+    has_more = len(messages) > bounded_limit
+    items = messages[-bounded_limit:]
+    return MessagePage(
+        items=items,
+        next_before_id=items[0].id if has_more and items else None,
+    )
+
+
+@app.get(
+    "/sessions/{session_id}/candidates/active",
+    response_model=list[SessionCandidate],
+)
+def list_active_candidates(
+    session_id: str,
+    service: CandidateLifecycleService = Depends(get_candidate_lifecycle_service),
+):
+    _require_default_session(session_id)
+    return service.list_active(session_id)
+
+
+@app.post(
+    "/sessions/{session_id}/candidates/{candidate_id}/accept",
+    response_model=CandidateAcceptResponse,
+)
+def accept_session_candidate(
+    session_id: str,
+    candidate_id: str,
+    service: CandidateLifecycleService = Depends(get_candidate_lifecycle_service),
+):
+    _require_default_session(session_id)
+    try:
+        return service.accept(session_id, candidate_id)
+    except CandidateExpiredError as exc:
+        raise HTTPException(status_code=409, detail="Candidate expired") from exc
+    except CandidateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/papers", response_model=list[SavedPaper])
+def list_saved_papers(store: MemoryStore = Depends(get_memory_store)):
+    return store.list_saved_papers()
 
 
 @app.post("/search")
@@ -290,12 +479,20 @@ def search(
     return result["ranked_candidates"]
 
 
-@app.get("/papers/candidates")
+@app.get(
+    "/papers/candidates",
+    deprecated=True,
+    description="Deprecated: use session-scoped active candidate endpoints.",
+)
 def list_candidates(store: MemoryStore = Depends(get_memory_store)):
     return store.list_candidate_papers()
 
 
-@app.post("/papers/{paper_id}/accept")
+@app.post(
+    "/papers/{paper_id}/accept",
+    deprecated=True,
+    description="Deprecated: use the session-scoped candidate accept endpoint.",
+)
 def accept_paper(
     paper_id: str,
     payload: AcceptPaperRequest | None = Body(default=None),
@@ -523,9 +720,15 @@ def archive_semantic_memory(
 
 @app.get("/memory/summary")
 def memory_summary(store: MemoryStore = Depends(get_memory_store)):
-    candidates = store.list_candidate_papers()
+    saved_paper_count = store.count_candidate_papers()
+    pending_candidates = store.list_memory_candidates(status="pending")
+    confirmed_memories = store.list_semantic_memory(status="confirmed")
+    known_dois = store.list_known_dois()
     return {
-        "candidate_count": len(candidates),
-        "known_dois": store.list_known_dois(),
+        "candidate_count": saved_paper_count,
+        "saved_paper_count": saved_paper_count,
+        "pending_candidate_count": len(pending_candidates),
+        "confirmed_memory_count": len(confirmed_memories),
+        "known_doi_count": len(known_dois),
         "recent_logs": store.list_experiment_logs(limit=5),
     }

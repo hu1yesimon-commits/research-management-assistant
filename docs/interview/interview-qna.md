@@ -325,3 +325,53 @@ This is why the system emphasizes experiment logs, memory review, sources, and d
 ## 30. Short answer when asked "Is this production-ready?"
 
 No. It is a resume-grade MVP with a real architecture and tested workflows. It demonstrates the core design patterns: discovery, ingestion, retrieval, grounded answer, idea recommendation, memory review, and provider abstraction. Production work would require stronger evaluation, security, deployment, observability, more robust PDF parsing, and richer provider monitoring.
+
+## 31. What changed in Agent Team V3?
+
+The main change is that the product now has a default permanent Session with bounded multi-turn orchestration.
+
+Instead of treating each assistant request as isolated, the backend now persists user and assistant messages, a session summary boundary, active session candidates, and agent-run summaries. The product surface stays conversational, but the execution remains constrained by typed plans and deterministic validation.
+
+## 32. Why only one default Session instead of full multi-session UI?
+
+Because the first problem to solve was workflow semantics, not session management UX.
+
+By keeping `session_id="default"` in the API and persistence model from day one, I can validate message history, candidate expiry, and trace semantics now, then add create/switch/archive UI later without rewriting the underlying store.
+
+## 33. What does bounded synchronous Agent Team mean here?
+
+It means the system has fixed roles and fixed plan types.
+
+- `Leader` is the only user-facing agent.
+- `Research` owns fresh literature discovery and candidate generation.
+- `Idea` consumes experiment context plus existing or newly discovered evidence.
+
+The planner can only choose from a small typed vocabulary such as `research`, `knowledge_qa`, `idea`, or `research_then_idea`. Validation rejects anything outside that bounded contract.
+
+## 34. Is this an autonomous multi-agent system?
+
+No.
+
+It is an agentic workflow, not an unconstrained autonomous system. There is no free loop, no dynamic agent creation, no automatic paper acceptance, and no background mailbox worker in the current implementation.
+
+## 35. What is logical agent persistence?
+
+Logical persistence means the system stores the agent-relevant state, but the agents are not resident processes.
+
+SQLite persists messages, summaries, active candidates, and agent-run records. When a new turn arrives, the system rebuilds the necessary context and executes synchronously, then releases runtime resources. This is different from keeping workers alive in the background.
+
+## 36. How do active candidates differ from saved papers and confirmed memory?
+
+They represent three different trust and persistence levels.
+
+- `active candidates`: temporary recommendations tied to the current Session turn window
+- `saved papers`: user-accepted papers in the global research library
+- `confirmed memory`: user-reviewed long-term facts derived from structured logs
+
+This separation prevents temporary recommendations or ordinary chat content from being treated as durable knowledge.
+
+## 37. Why mention SQLite Mailbox if it is not implemented?
+
+Because it is the planned dispatcher replacement, not a current capability.
+
+The current dispatcher is synchronous direct execution. The code and docs call out SQLite Mailbox only as a future path so that the present architecture is explainable without pretending that background workers already exist.

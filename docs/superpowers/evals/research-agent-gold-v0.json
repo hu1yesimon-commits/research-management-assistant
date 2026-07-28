@@ -1,0 +1,533 @@
+{
+  "dataset": "research-agent-gold",
+  "version": "0.2.0-draft",
+  "status": "human_review_required",
+  "primary_workflow": "experiment_improvement",
+  "primary_domain": {
+    "name": "one_dimensional_time_series",
+    "tasks": ["classification", "localization"],
+    "repository_name_is_domain_signal": false
+  },
+  "notes": [
+    "Synthetic fixtures only; no score in this file is an observed model result.",
+    "Prompt examples, development cases, frozen test cases, and human feedback must remain separate.",
+    "Retrieved chunk ids are the only allowed citation ids for grounded paper claims.",
+    "The repository name graphReconstruction describes a LangGraph refactor and must not be inferred as a research topic."
+  ],
+  "allowed_routes": [
+    "direct_reply",
+    "clarify",
+    "discovery",
+    "knowledge_qa",
+    "discovery_with_knowledge",
+    "experiment_improvement",
+    "experiment_discovery_fallback",
+    "memory_command"
+  ],
+  "cases": [
+    {
+      "case_id": "exp-supported-precision-001",
+      "scope": ["state", "route", "retrieval", "answer", "ablation"],
+      "messages": [
+        {
+          "id": 101,
+          "role": "user",
+          "text": "我用 focal loss 后 recall 上去了，但是 precision 明显下降。接下来想保住 recall，同时把 precision 拉回来。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "improve one-dimensional time-series event classification",
+        "attempted_methods": ["threshold tuning"],
+        "observed_results": ["threshold tuning had unstable precision"],
+        "decisions": [],
+        "unresolved_problems": ["recover precision without sacrificing recall"],
+        "current_constraints": [],
+        "updated_through_message_id": 100
+      },
+      "preference_memory": ["prefer small falsifiable experiments"],
+      "expected_state": {
+        "intent": "experiment_improvement",
+        "attempted_methods": ["focal loss"],
+        "observed_results": ["recall increased", "precision decreased"],
+        "decisions": ["preserve recall"],
+        "unresolved_problems": ["recover precision without sacrificing recall"],
+        "source_message_ids": [101]
+      },
+      "expected_route": "experiment_improvement",
+      "retrieval_fixture": {
+        "retrieved_chunks": [
+          {
+            "chunk_id": "chunk-calibration-1",
+            "text": "Validation-set threshold calibration can trade precision against recall without retraining the classifier."
+          },
+          {
+            "chunk_id": "chunk-augmentation-noise-1",
+            "text": "Unrelated augmentation settings were evaluated for robustness but did not address precision-recall calibration."
+          }
+        ],
+        "relevant_chunk_ids": ["chunk-calibration-1"]
+      },
+      "answer_contract": {
+        "required_points": [
+          "propose a threshold calibration experiment",
+          "preserve recall as an explicit acceptance constraint"
+        ],
+        "forbidden_claims": [
+          "focal loss is proven to improve precision in this experiment"
+        ],
+        "allowed_citation_ids": ["chunk-calibration-1"],
+        "must_warn": false
+      },
+      "forbidden_actions": ["accept_candidate", "upload_pdf", "embed_paper"]
+    },
+    {
+      "case_id": "exp-sensor-drift-fallback-002",
+      "scope": ["state", "route", "retrieval", "answer"],
+      "messages": [
+        {
+          "id": 201,
+          "role": "user",
+          "text": "一维传感器分类模型在设备更换后几乎完全失效了，本地论文能不能告诉我下一步怎么改？"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "robust one-dimensional sensor time-series classification",
+        "attempted_methods": ["fixed global normalization"],
+        "observed_results": ["classification performance collapsed after device shift"],
+        "decisions": [],
+        "unresolved_problems": ["handle cross-device distribution shift"],
+        "current_constraints": [],
+        "updated_through_message_id": 200
+      },
+      "preference_memory": [],
+      "expected_state": {
+        "intent": "experiment_improvement",
+        "attempted_methods": [],
+        "observed_results": ["classification failed after device shift"],
+        "unresolved_problems": ["handle cross-device distribution shift"],
+        "source_message_ids": [201]
+      },
+      "expected_route": "experiment_discovery_fallback",
+      "retrieval_fixture": {
+        "retrieved_chunks": [
+          {
+            "chunk_id": "chunk-same-device-only-1",
+            "text": "The reported benchmark uses training and test windows collected from the same sensor device."
+          }
+        ],
+        "relevant_chunk_ids": []
+      },
+      "answer_contract": {
+        "required_points": [
+          "state that local evidence is insufficient",
+          "recommend discovery for cross-device time-series adaptation evidence"
+        ],
+        "forbidden_claims": [
+          "the retrieved paper solves cross-device sensor shift"
+        ],
+        "allowed_citation_ids": [],
+        "must_warn": true
+      },
+      "forbidden_actions": ["accept_candidate"]
+    },
+    {
+      "case_id": "exp-missing-context-clarify-003",
+      "scope": ["state", "route"],
+      "messages": [
+        {
+          "id": 301,
+          "role": "user",
+          "text": "这个结果不行，帮我继续改。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "",
+        "attempted_methods": [],
+        "observed_results": [],
+        "decisions": [],
+        "unresolved_problems": [],
+        "current_constraints": [],
+        "updated_through_message_id": 0
+      },
+      "preference_memory": [],
+      "expected_state": {
+        "intent": "clarify",
+        "attempted_methods": [],
+        "observed_results": [],
+        "unresolved_problems": [],
+        "source_message_ids": [301]
+      },
+      "expected_route": "clarify",
+      "required_clarification_fields": ["experiment task", "attempted method", "observed result", "desired outcome"],
+      "forbidden_actions": ["discovery", "grounded_answer", "accept_candidate"]
+    },
+    {
+      "case_id": "exp-current-overrides-stale-summary-004",
+      "scope": ["state", "route", "answer"],
+      "messages": [
+        {
+          "id": 401,
+          "role": "user",
+          "text": "上次说优先提高 recall 已经过时了。现在 recall 足够，我只想减少 false positives。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "maximize recall",
+        "attempted_methods": ["class weighting"],
+        "observed_results": ["recall reached target"],
+        "decisions": ["continue prioritizing recall"],
+        "unresolved_problems": ["increase recall"],
+        "current_constraints": [],
+        "updated_through_message_id": 400
+      },
+      "preference_memory": [],
+      "expected_state": {
+        "intent": "experiment_improvement",
+        "decisions": ["prioritize reducing false positives"],
+        "unresolved_problems": ["reduce false positives"],
+        "superseded_decisions": ["continue prioritizing recall"],
+        "source_message_ids": [401]
+      },
+      "expected_route": "experiment_improvement",
+      "retrieval_fixture": {
+        "retrieved_chunks": [
+          {
+            "chunk_id": "chunk-fp-calibration-1",
+            "text": "Increasing the positive decision threshold reduced false positives while preserving acceptable recall on the validation split."
+          }
+        ],
+        "relevant_chunk_ids": ["chunk-fp-calibration-1"]
+      },
+      "answer_contract": {
+        "required_points": ["optimize for false-positive reduction"],
+        "forbidden_claims": ["the current goal is to maximize recall"],
+        "allowed_citation_ids": ["chunk-fp-calibration-1"],
+        "must_warn": false
+      },
+      "forbidden_actions": []
+    },
+    {
+      "case_id": "exp-do-not-repeat-failed-method-005",
+      "scope": ["state", "answer", "ablation"],
+      "messages": [
+        {
+          "id": 501,
+          "role": "user",
+          "text": "继续给我一个小实验，但别再建议增大模型了。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "improve one-dimensional event classification precision",
+        "attempted_methods": ["increase model depth", "increase hidden size"],
+        "observed_results": ["larger models overfit and exceeded memory budget"],
+        "decisions": ["reject model scaling"],
+        "unresolved_problems": ["improve precision under current compute budget"],
+        "current_constraints": ["fixed GPU memory budget"],
+        "updated_through_message_id": 500
+      },
+      "preference_memory": ["prefer lightweight methods"],
+      "expected_state": {
+        "intent": "experiment_improvement",
+        "decisions": ["do not increase model size"],
+        "constraints": ["fixed GPU memory budget"],
+        "unresolved_problems": ["improve precision under current compute budget"],
+        "source_message_ids": [501]
+      },
+      "expected_route": "experiment_improvement",
+      "retrieval_fixture": {
+        "retrieved_chunks": [
+          {
+            "chunk_id": "chunk-postprocess-1",
+            "text": "A lightweight calibration layer improved precision without changing the encoder architecture."
+          },
+          {
+            "chunk_id": "chunk-deeper-model-1",
+            "text": "A deeper encoder increased parameter count and training memory."
+          }
+        ],
+        "relevant_chunk_ids": ["chunk-postprocess-1"]
+      },
+      "answer_contract": {
+        "required_points": ["propose a lightweight calibration experiment"],
+        "forbidden_claims": ["increase model depth", "increase hidden size"],
+        "allowed_citation_ids": ["chunk-postprocess-1"],
+        "must_warn": false
+      },
+      "forbidden_actions": []
+    },
+    {
+      "case_id": "exp-window-preference-not-evidence-006",
+      "scope": ["answer", "ablation"],
+      "messages": [
+        {
+          "id": 601,
+          "role": "user",
+          "text": "结合本地证据给我下一步实验。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "reduce training instability",
+        "attempted_methods": ["learning-rate decay"],
+        "observed_results": ["loss still oscillates"],
+        "decisions": [],
+        "unresolved_problems": ["stabilize optimization"],
+        "current_constraints": [],
+        "updated_through_message_id": 600
+      },
+      "preference_memory": ["user believes longer input windows always solve instability"],
+      "expected_route": "experiment_improvement",
+      "retrieval_fixture": {
+        "retrieved_chunks": [
+          {
+            "chunk_id": "chunk-gradient-clip-1",
+            "text": "Gradient clipping reduced optimization spikes in the reported ablation."
+          }
+        ],
+        "relevant_chunk_ids": ["chunk-gradient-clip-1"]
+      },
+      "answer_contract": {
+        "required_points": ["propose a gradient clipping ablation"],
+        "forbidden_claims": ["longer input windows are proven to solve the instability"],
+        "allowed_citation_ids": ["chunk-gradient-clip-1"],
+        "must_warn": false,
+        "summary_as_evidence_violation": false
+      },
+      "forbidden_actions": []
+    },
+    {
+      "case_id": "exp-short-event-noisy-retrieval-007",
+      "scope": ["retrieval", "answer"],
+      "messages": [
+        {
+          "id": 701,
+          "role": "user",
+          "text": "现有模型对持续时间很短的瞬态事件漏检严重，有没有基于证据的小实验？"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "improve short-event classification in one-dimensional time series",
+        "attempted_methods": ["uniform fixed-length windows"],
+        "observed_results": ["short transient events are frequently missed"],
+        "decisions": [],
+        "unresolved_problems": ["retain short transient evidence during windowing"],
+        "current_constraints": [],
+        "updated_through_message_id": 700
+      },
+      "preference_memory": [],
+      "expected_route": "experiment_improvement",
+      "retrieval_fixture": {
+        "retrieved_chunks": [
+          {
+            "chunk_id": "chunk-short-event-multiscale-1",
+            "text": "A multi-scale temporal branch improved recall for short events while preserving a shared classifier."
+          },
+          {
+            "chunk_id": "chunk-image-detection-1",
+            "text": "Dense image object detection was evaluated using two-dimensional feature pyramids."
+          },
+          {
+            "chunk_id": "chunk-timeseries-history-1",
+            "text": "Time-series classification has been studied across many sensor applications."
+          }
+        ],
+        "relevant_chunk_ids": ["chunk-short-event-multiscale-1"]
+      },
+      "answer_contract": {
+        "required_points": ["propose a multi-scale temporal branch experiment"],
+        "forbidden_claims": ["two-dimensional image feature pyramids apply directly without validation"],
+        "allowed_citation_ids": ["chunk-short-event-multiscale-1"],
+        "must_warn": false
+      },
+      "forbidden_actions": []
+    },
+    {
+      "case_id": "exp-explicit-fresh-discovery-008",
+      "scope": ["state", "route"],
+      "messages": [
+        {
+          "id": 801,
+          "role": "user",
+          "text": "本地论文先不用，帮我针对这个实验找 2026 年的新论文，再让我挑选。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "improve one-dimensional time-series localization robustness",
+        "attempted_methods": ["amplitude noise injection"],
+        "observed_results": ["classification robustness improved slightly but localization did not"],
+        "decisions": [],
+        "unresolved_problems": ["find newer robustness methods"],
+        "current_constraints": [],
+        "updated_through_message_id": 800
+      },
+      "preference_memory": [],
+      "expected_state": {
+        "intent": "discovery",
+        "constraints": ["publication year 2026", "do not use local knowledge answer"],
+        "source_message_ids": [801]
+      },
+      "expected_route": "discovery",
+      "forbidden_actions": ["knowledge_qa", "accept_candidate", "upload_pdf", "embed_paper"]
+    },
+    {
+      "case_id": "exp-localization-local-only-insufficient-009",
+      "scope": ["state", "route", "answer"],
+      "messages": [
+        {
+          "id": 901,
+          "role": "user",
+          "text": "只根据已经保存的论文回答，不要联网搜索。如果证据不够就直接告诉我。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "understand one-dimensional event localization boundary errors",
+        "attempted_methods": [],
+        "observed_results": ["event onset is detected late and offset is detected early"],
+        "decisions": ["do not search external sources"],
+        "unresolved_problems": ["explain systematic onset and offset localization bias"],
+        "current_constraints": ["local evidence only"],
+        "updated_through_message_id": 900
+      },
+      "preference_memory": [],
+      "expected_state": {
+        "intent": "knowledge_qa",
+        "constraints": ["local evidence only", "warn if insufficient"],
+        "source_message_ids": [901]
+      },
+      "expected_route": "knowledge_qa",
+      "retrieval_fixture": {
+        "retrieved_chunks": [],
+        "relevant_chunk_ids": []
+      },
+      "answer_contract": {
+        "required_points": ["state that local evidence is insufficient"],
+        "forbidden_claims": ["external papers were searched"],
+        "allowed_citation_ids": [],
+        "must_warn": true
+      },
+      "forbidden_actions": ["discovery", "accept_candidate"]
+    },
+    {
+      "case_id": "exp-localization-discovery-with-knowledge-010",
+      "scope": ["route", "retrieval", "answer", "e2e"],
+      "messages": [
+        {
+          "id": 1001,
+          "role": "user",
+          "text": "先根据我保存的论文解释为什么事件边界总是偏移，再给我推荐一些新的时序定位论文。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "improve one-dimensional event localization",
+        "attempted_methods": ["frame-level classification with fixed threshold"],
+        "observed_results": ["predicted event boundaries are consistently delayed"],
+        "decisions": [],
+        "unresolved_problems": ["reduce onset and offset boundary bias"],
+        "current_constraints": [],
+        "updated_through_message_id": 1000
+      },
+      "preference_memory": [],
+      "expected_route": "discovery_with_knowledge",
+      "retrieval_fixture": {
+        "retrieved_chunks": [
+          {
+            "chunk_id": "chunk-boundary-resolution-1",
+            "text": "Coarse temporal downsampling shifted predicted onset and offset positions when short events occupied only a few frames."
+          }
+        ],
+        "relevant_chunk_ids": ["chunk-boundary-resolution-1"],
+        "discovery_candidate_ids": ["candidate-new-1", "candidate-new-2"]
+      },
+      "answer_contract": {
+        "required_points": ["explain how coarse temporal downsampling can shift event boundaries"],
+        "forbidden_claims": ["candidate-new-1 is a grounded source", "candidate-new-2 is a grounded source"],
+        "allowed_citation_ids": ["chunk-boundary-resolution-1"],
+        "must_warn": false
+      },
+      "expected_final_outcome": {
+        "grounded_answer_present": true,
+        "discovery_candidates_present": true,
+        "evidence_channels_separated": true
+      },
+      "forbidden_actions": ["accept_candidate"]
+    },
+    {
+      "case_id": "exp-summary-guides-answer-not-facts-011",
+      "scope": ["answer", "ablation"],
+      "messages": [
+        {
+          "id": 1101,
+          "role": "user",
+          "text": "下一步最小实验是什么？"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "improve precision without increasing runtime substantially",
+        "attempted_methods": ["deeper encoder", "larger hidden dimension"],
+        "observed_results": ["both increased runtime without stable precision gains"],
+        "decisions": ["stop scaling the encoder"],
+        "unresolved_problems": ["improve precision with bounded runtime"],
+        "current_constraints": ["runtime increase below 10 percent"],
+        "updated_through_message_id": 1100
+      },
+      "preference_memory": ["prefer one-variable experiments"],
+      "expected_route": "experiment_improvement",
+      "retrieval_fixture": {
+        "retrieved_chunks": [
+          {
+            "chunk_id": "chunk-loss-margin-1",
+            "text": "Changing only the classification margin improved precision in the reported ablation while keeping the encoder unchanged."
+          }
+        ],
+        "relevant_chunk_ids": ["chunk-loss-margin-1"]
+      },
+      "answer_contract": {
+        "required_points": [
+          "change one classification-margin variable",
+          "keep the encoder unchanged",
+          "measure runtime increase"
+        ],
+        "forbidden_claims": [
+          "the paper proves runtime will increase by less than 10 percent",
+          "increase encoder depth"
+        ],
+        "allowed_citation_ids": ["chunk-loss-margin-1"],
+        "must_warn": false,
+        "summary_as_evidence_violation": false
+      },
+      "forbidden_actions": []
+    },
+    {
+      "case_id": "exp-memory-command-not-research-route-012",
+      "scope": ["state", "route"],
+      "messages": [
+        {
+          "id": 1201,
+          "role": "user",
+          "text": "记住，以后的实验建议优先给我可以一天内完成的小实验。"
+        }
+      ],
+      "session_summary": {
+        "research_goal": "one-dimensional time-series classification and localization",
+        "attempted_methods": [],
+        "observed_results": [],
+        "decisions": [],
+        "unresolved_problems": [],
+        "current_constraints": [],
+        "updated_through_message_id": 1200
+      },
+      "preference_memory": [],
+      "expected_state": {
+        "intent": "memory_command",
+        "preference_candidates": ["prefer experiments completable within one day"],
+        "source_message_ids": [1201]
+      },
+      "expected_route": "memory_command",
+      "expected_final_outcome": {
+        "memory_candidate_created": true,
+        "memory_source": "explicit",
+        "memory_scope": "session"
+      },
+      "forbidden_actions": ["discovery", "knowledge_qa", "grounded_answer", "accept_candidate"]
+    }
+  ]
+}

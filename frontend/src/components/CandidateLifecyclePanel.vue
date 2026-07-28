@@ -1,21 +1,19 @@
 <template>
-  <section class="panel panel--full">
-    <div class="panel__heading">
-      <div>
-        <h2>Saved Candidates</h2>
-        <p>Accepted, uploaded, chunked, or embedded papers stored in SQLite. This list does not automatically mirror the current discovery results.</p>
-      </div>
+  <div>
+    <div class="lifecycle-toolbar">
       <button class="button button--ghost" type="button" @click="$emit('refresh')" :disabled="loading">
         Refresh
       </button>
     </div>
 
     <div v-if="error" class="alert alert--danger">
-      <strong>Candidate load failed:</strong> {{ error }}
+      <strong>Saved paper load failed:</strong> {{ error }}
     </div>
 
-    <p v-if="loading" class="empty-state">Loading candidates...</p>
-    <p v-else-if="!candidates.length" class="empty-state">No saved candidates in SQLite yet.</p>
+    <p v-if="loading" class="empty-state">Loading saved papers...</p>
+    <p v-else-if="!candidates.length" class="empty-state">
+      No saved papers yet. Accept a discovery candidate to start building your local research set.
+    </p>
 
     <ul v-else class="stack-list">
       <li v-for="candidate in candidates" :key="candidate.paper_id" class="lifecycle-card">
@@ -78,7 +76,7 @@
         </p>
       </li>
     </ul>
-  </section>
+  </div>
 </template>
 
 <script setup>

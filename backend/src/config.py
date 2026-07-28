@@ -4,6 +4,8 @@ load_dotenv()
 import os
 from dataclasses import dataclass
 
+from agent_team.providers import validate_provider_name
+
 
 @dataclass
 class Config:
@@ -39,16 +41,30 @@ class Config:
     embedding_provider: str = "fake"
     bge_m3_model_name: str = "BAAI/bge-m3"
     answer_provider: str = "deterministic"
-    answer_model: str = "gpt-4.1-mini"
+    answer_model: str = "deepseek-chat"
     answer_temperature: float = 0.0
     idea_provider: str = "deterministic"
     idea_model: str = "deepseek-chat"
     idea_temperature: float = 0.0
+    leader_provider: str = "deterministic"
+    leader_model: str = "deepseek-chat"
+    leader_temperature: float = 0.0
+    leader_response_provider: str = "deepseek"
+    leader_response_model: str = "deepseek-chat"
+    leader_response_temperature: float = 0.2
+    summary_provider: str = "deterministic"
+    agent_step_timeout_seconds: float = 120.0
+    turn_timeout_seconds: float = 240.0
     paper_judge_provider: str = "mock"
     paper_judge_model: str = "deepseek-chat"
     deepseek_api_key: str = ""
     deepseek_base_url: str = ""
     deepseek_model: str = "deepseek-chat"
+
+    def __post_init__(self):
+        self.leader_provider = validate_provider_name(self.leader_provider)
+        self.leader_response_provider = validate_provider_name(self.leader_response_provider)
+        self.summary_provider = validate_provider_name(self.summary_provider)
 
 config = Config(
     arxiv_max_results=int(os.getenv("ARXIV_MAX_RESULTS", "10")),
@@ -73,11 +89,20 @@ config = Config(
     embedding_provider=os.getenv("EMBEDDING_PROVIDER", "fake"),
     bge_m3_model_name=os.getenv("BGE_M3_MODEL_NAME", "BAAI/bge-m3"),
     answer_provider=os.getenv("ANSWER_PROVIDER", "deterministic"),
-    answer_model=os.getenv("ANSWER_MODEL", "gpt-4.1-mini"),
+    answer_model=os.getenv("ANSWER_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
     answer_temperature=float(os.getenv("ANSWER_TEMPERATURE", "0")),
     idea_provider=os.getenv("IDEA_PROVIDER", "deterministic"),
     idea_model=os.getenv("IDEA_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
     idea_temperature=float(os.getenv("IDEA_TEMPERATURE", "0")),
+    leader_provider=os.getenv("LEADER_PROVIDER", "deterministic"),
+    leader_model=os.getenv("LEADER_MODEL", "deepseek-chat"),
+    leader_temperature=float(os.getenv("LEADER_TEMPERATURE", "0")),
+    leader_response_provider=os.getenv("LEADER_RESPONSE_PROVIDER", "deepseek"),
+    leader_response_model=os.getenv("LEADER_RESPONSE_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
+    leader_response_temperature=float(os.getenv("LEADER_RESPONSE_TEMPERATURE", "0.2")),
+    summary_provider=os.getenv("SUMMARY_PROVIDER", "deterministic"),
+    agent_step_timeout_seconds=float(os.getenv("AGENT_STEP_TIMEOUT_SECONDS", "120")),
+    turn_timeout_seconds=float(os.getenv("TURN_TIMEOUT_SECONDS", "240")),
     paper_judge_provider=os.getenv("PAPER_JUDGE_PROVIDER", "mock"),
     paper_judge_model=os.getenv("PAPER_JUDGE_MODEL", os.getenv("DEEPSEEK_MODEL", "deepseek-chat")),
     deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),

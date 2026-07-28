@@ -6,7 +6,18 @@ vi.mock("../../api", async () => {
   return {
     ...actual,
     getHealth: vi.fn().mockResolvedValue({ status: "ok" }),
-    getCandidates: vi.fn().mockResolvedValue([]),
+    getSessionMessages: vi.fn().mockResolvedValue({ items: [], next_before_id: null }),
+    getActiveCandidates: vi.fn().mockResolvedValue([]),
+    getSavedPapers: vi.fn().mockResolvedValue([]),
+    getMemorySummary: vi.fn().mockResolvedValue({
+      candidate_count: 0,
+      saved_paper_count: 0,
+      pending_candidate_count: 0,
+      confirmed_memory_count: 0,
+      known_doi_count: 0,
+      recent_logs: [],
+    }),
+    createSessionTurn: vi.fn(),
     researchQuery: vi.fn().mockResolvedValue({
       discovery: { enabled: true, candidates: [], error: null },
       knowledge: { enabled: true, answer: null, sources: [], error: null, mode: null },
@@ -87,6 +98,10 @@ describe("Idea Assistant frontend slice", () => {
     const wrapper = mount(ResearchWorkbench);
 
     await Promise.resolve();
+    await Promise.resolve();
+
+    expect(wrapper.find("#idea-assistant-panel").exists()).toBe(false);
+    await wrapper.get("button.legacy-tools__toggle").trigger("click");
     await Promise.resolve();
 
     expect(wrapper.find("#idea-assistant-panel").exists()).toBe(true);

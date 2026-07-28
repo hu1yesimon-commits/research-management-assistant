@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("../../api", async () => {
@@ -6,39 +6,91 @@ vi.mock("../../api", async () => {
   return {
     ...actual,
     getHealth: vi.fn().mockResolvedValue({ status: "ok" }),
-    getCandidates: vi.fn().mockResolvedValue([]),
-    researchAssistant: vi.fn(),
+    getSessionMessages: vi.fn().mockResolvedValue({
+      items: [
+        { id: 1, role: "user", content: { text: "Earlier question" } },
+        { id: 2, role: "assistant", content: { assistant_message: "Earlier answer" } },
+      ],
+      next_before_id: null,
+    }),
+    createSessionTurn: vi.fn(),
+    getActiveCandidates: vi.fn().mockResolvedValue([
+      {
+        id: "candidate-1",
+        batch_id: "batch-1",
+        paper_key: "paper-1",
+        status: "active",
+        paper_snapshot: {
+          paper_id: "paper-1",
+          title: "Candidate paper title",
+          authors: ["Ada Lovelace"],
+          doi: "10.1000/paper-1",
+          venue: "GraphConf",
+        },
+        judgement: {
+          final_score: 0.91,
+          llm_relevance_score: 0.88,
+          reason: "Highly relevant.",
+        },
+      },
+    ]),
+    getSavedPapers: vi.fn().mockResolvedValue([]),
+    getMemorySummary: vi.fn().mockResolvedValue({
+      candidate_count: 0,
+      saved_paper_count: 0,
+      pending_candidate_count: 2,
+      confirmed_memory_count: 5,
+      known_doi_count: 3,
+      recent_logs: [{ content: "latest log", tags: ["graph"] }],
+    }),
     researchQuery: vi.fn(),
     acceptPaper: vi.fn(),
+    acceptSessionCandidate: vi.fn(),
     uploadPdf: vi.fn(),
     embedPaper: vi.fn(),
   };
 });
 
-import { researchAssistant, researchQuery } from "../../api";
+import {
+  acceptSessionCandidate,
+  createSessionTurn,
+  getActiveCandidates,
+  getMemorySummary,
+  getSavedPapers,
+  getSessionMessages,
+  researchQuery,
+} from "../../api";
 import ResearchWorkbench from "../ResearchWorkbench.vue";
 
-const assistantResponse = {
-  discovery: {
-    enabled: true,
-    candidates: [
-      {
-        paper: {
-          paper_id: "assistant-paper",
-          title: "Assistant discovery paper",
-          authors: ["Ada Lovelace"],
-          doi: "10.0000/assistant",
-          venue: "Assistant Venue",
-        },
-        judgement: {
-          final_score: 0.91,
-          llm_relevance_score: 0.88,
-          reason: "Assistant discovery reason",
-        },
-      },
-    ],
-    error: null,
+const sessionTurnResponse = {
+  session_id: "default",
+  turn_id: "turn-2",
+  status: "completed",
+  assistant_message: "I can search with local context and discovery together.",
+  plan: {
+    plan_type: "research",
+    goal: "Find papers",
   },
+  active_candidates: [
+    {
+      id: "candidate-1",
+      batch_id: "batch-1",
+      paper_key: "paper-1",
+      status: "active",
+      paper_snapshot: {
+        paper_id: "paper-1",
+        title: "Candidate paper title",
+        authors: ["Ada Lovelace"],
+        doi: "10.1000/paper-1",
+        venue: "GraphConf",
+      },
+      judgement: {
+        final_score: 0.91,
+        llm_relevance_score: 0.88,
+        reason: "Highly relevant.",
+      },
+    },
+  ],
   knowledge: {
     enabled: true,
     answer: "Assistant knowledge answer",
@@ -54,6 +106,8 @@ const assistantResponse = {
     error: null,
     mode: "assistant-grounded",
   },
+  agent_runs: [{ agent_name: "research", action: "recommend_papers", status: "completed" }],
+  errors: [{ agent_name: "research", stage: "search", message: "partial timeout" }],
 };
 
 const queryResponse = {
@@ -94,66 +148,222 @@ const queryResponse = {
   },
 };
 
-describe("ResearchWorkbench result source switching", () => {
-  test("shows assistant results after assistant success", async () => {
-    researchAssistant.mockResolvedValueOnce(assistantResponse);
-    const wrapper = mount(ResearchWorkbench);
+describe("ResearchWorkbench", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getSessionMessages.mockResolvedValue({
+      items: [
+        { id: 1, role: "user", content: { text: "Earlier question" } },
+        { id: 2, role: "assistant", content: { assistant_message: "Earlier answer" } },
+      ],
+      next_before_id: null,
+    });
+    getActiveCandidates.mockResolvedValue([
+      {
+        id: "candidate-1",
+        batch_id: "batch-1",
+        paper_key: "paper-1",
+        status: "active",
+        paper_snapshot: {
+          paper_id: "paper-1",
+          title: "Candidate paper title",
+          authors: ["Ada Lovelace"],
+          doi: "10.1000/paper-1",
+          venue: "GraphConf",
+        },
+        judgement: {
+          final_score: 0.91,
+          llm_relevance_score: 0.88,
+          reason: "Highly relevant.",
+        },
+      },
+    ]);
+    getSavedPapers.mockResolvedValue([]);
+  });
 
-    await wrapper.find("#assistant-query").setValue("assistant route");
-    await wrapper.find("form.assistant-form").trigger("submit.prevent");
+  test("renders the session-first layout and loads default session resources on mount", async () => {
+    const wrapper = mount(ResearchWorkbench);
     await flushPromises();
 
     const text = wrapper.text();
-    expect(text).toContain("Results source: assistant");
-    expect(text).toContain("Assistant knowledge answer");
-    expect(text).toContain("Assistant source evidence");
-    expect(text).toContain("Assistant discovery paper");
-    expect(text).toContain("Assistant discovery reason");
-    expect(text).not.toContain("Legacy query knowledge answer");
-    expect(text).not.toContain("Legacy query discovery paper");
+    expect(text).toContain("Session Chat");
+    expect(text).toContain("Earlier answer");
+    expect(text).toContain("Memory Summary");
+    expect(text).toContain("Pending review: 2");
+    expect(text).toContain("Confirmed memory: 5");
+    expect(text).toContain("Legacy tools");
+    expect(text).toContain("Saved Candidates & Lifecycle");
+    expect(text).toContain("Active Candidates");
+    expect(text).toContain("Candidate paper title");
+    expect(getSessionMessages).toHaveBeenCalledWith("default");
+    expect(getActiveCandidates).toHaveBeenCalledWith("default");
+    expect(getSavedPapers).toHaveBeenCalled();
   });
 
-  test("switches back to research/query results after legacy query success", async () => {
-    researchAssistant.mockResolvedValueOnce(assistantResponse);
+  test("submits a session turn, reloads messages and active candidates, and updates the latest result", async () => {
+    createSessionTurn.mockResolvedValueOnce(sessionTurnResponse);
+    getSessionMessages.mockResolvedValueOnce({
+      items: [
+        { id: 1, role: "user", content: { text: "Earlier question" } },
+        { id: 2, role: "assistant", content: { assistant_message: "Earlier answer" } },
+      ],
+      next_before_id: null,
+    });
+    getSessionMessages.mockResolvedValueOnce({
+      items: [
+        { id: 1, role: "user", content: { text: "Earlier question" } },
+        { id: 2, role: "assistant", content: { assistant_message: "Earlier answer" } },
+        { id: 3, role: "user", content: { text: "Find fresh papers" } },
+        { id: 4, role: "assistant", content: { assistant_message: "I can search with local context and discovery together." } },
+      ],
+      next_before_id: null,
+    });
+    const wrapper = mount(ResearchWorkbench);
+    await flushPromises();
+
+    await wrapper.find("#session-chat-input").setValue("Find fresh papers");
+    await wrapper.find("form.session-chat-form").trigger("submit.prevent");
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(createSessionTurn).toHaveBeenCalledWith(
+      "default",
+      expect.objectContaining({
+        message: "Find fresh papers",
+        idempotency_key: expect.any(String),
+      }),
+    );
+    expect(getSessionMessages).toHaveBeenCalledTimes(2);
+    expect(getActiveCandidates).toHaveBeenCalledTimes(2);
+    expect(text).toContain("Assistant knowledge answer");
+    expect(text).toContain("I can search with local context and discovery together.");
+    expect(text).toContain("Plan: research");
+    await wrapper.get(".trace-details summary").trigger("click");
+    await flushPromises();
+    const expandedText = wrapper.text();
+    expect(expandedText).toContain("partial timeout");
+  });
+
+  test("keeps legacy query tools behind a collapsed panel and can still run them", async () => {
     researchQuery.mockResolvedValueOnce(queryResponse);
     const wrapper = mount(ResearchWorkbench);
-
-    await wrapper.find("#assistant-query").setValue("assistant route");
-    await wrapper.find("form.assistant-form").trigger("submit.prevent");
     await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Direct Research Query");
+
+    await wrapper.find("button.legacy-tools__toggle").trigger("click");
+    expect(wrapper.text()).toContain("Direct Research Query");
 
     await wrapper.find("#query").setValue("legacy route");
     await wrapper.find("form.query-form").trigger("submit.prevent");
     await flushPromises();
 
     const text = wrapper.text();
-    expect(text).toContain("Results source: research/query");
     expect(text).toContain("Legacy query knowledge answer");
-    expect(text).toContain("Legacy query source evidence");
-    expect(text).toContain("Legacy query discovery paper");
-    expect(text).toContain("Legacy query discovery reason");
-    expect(text).not.toContain("Assistant knowledge answer");
-    expect(text).not.toContain("Assistant discovery paper");
+    expect(text).not.toContain("Legacy query discovery paper");
+  });
+
+  test("keeps Idea Assistant as a separate structured log workflow", async () => {
+    const wrapper = mount(ResearchWorkbench);
+    await flushPromises();
+
+    await wrapper.find("button.legacy-tools__toggle").trigger("click");
+
+    expect(wrapper.text()).toContain("Idea Assistant");
+    expect(wrapper.text()).toContain("Structured experiment logs");
+  });
+
+  test("keeps lifecycle collapsed until the user opens it", async () => {
+    getSavedPapers.mockResolvedValueOnce([
+      {
+        paper_id: "saved-paper-1",
+        title: "Saved paper",
+        doi: "10.0000/saved",
+        venue: "Saved Venue",
+        authors: ["Ada Lovelace"],
+        judgement: {
+          scores: {
+            final_score: 0.91,
+          },
+        },
+      },
+    ]);
+    const wrapper = mount(ResearchWorkbench);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Saved Candidates & Lifecycle");
+    expect(wrapper.text()).not.toContain("Upload PDF");
+
+    await wrapper.find("button.lifecycle-tools__toggle").trigger("click");
+    expect(wrapper.text()).toContain("Upload PDF");
   });
 
   test("clears stale assistant results after a later assistant failure", async () => {
-    researchAssistant.mockResolvedValueOnce(assistantResponse).mockRejectedValueOnce(new Error("assistant offline"));
+    createSessionTurn.mockResolvedValueOnce(sessionTurnResponse).mockRejectedValueOnce(new Error("assistant offline"));
+    getSessionMessages
+      .mockResolvedValueOnce({
+        items: [
+          { id: 1, role: "user", content: { text: "Earlier question" } },
+          { id: 2, role: "assistant", content: { assistant_message: "Earlier answer" } },
+        ],
+        next_before_id: null,
+      })
+      .mockResolvedValueOnce({
+        items: [
+          { id: 1, role: "user", content: { text: "Earlier question" } },
+          { id: 2, role: "assistant", content: { assistant_message: "Earlier answer" } },
+          { id: 3, role: "user", content: { text: "assistant route" } },
+          { id: 4, role: "assistant", content: { assistant_message: "I can search with local context and discovery together." } },
+        ],
+        next_before_id: null,
+      });
     const wrapper = mount(ResearchWorkbench);
-
-    await wrapper.find("#assistant-query").setValue("assistant route");
-    await wrapper.find("form.assistant-form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Results source: assistant");
+    await wrapper.find("#session-chat-input").setValue("assistant route");
+    await wrapper.find("form.session-chat-form").trigger("submit.prevent");
+    await flushPromises();
+
     expect(wrapper.text()).toContain("Assistant knowledge answer");
 
-    await wrapper.find("#assistant-query").setValue("assistant route retry");
-    await wrapper.find("form.assistant-form").trigger("submit.prevent");
+    await wrapper.find("#session-chat-input").setValue("assistant route retry");
+    await wrapper.find("form.session-chat-form").trigger("submit.prevent");
     await flushPromises();
 
     const text = wrapper.text();
     expect(text).toContain("assistant offline");
     expect(text).not.toContain("Assistant knowledge answer");
-    expect(text).not.toContain("Assistant discovery paper");
+  });
+
+  test("accepting an active candidate removes it, reloads saved papers and memory, and keeps chat history unchanged", async () => {
+    acceptSessionCandidate.mockResolvedValueOnce({
+      candidate_id: "candidate-1",
+      paper_id: "paper-1",
+      status: "accepted",
+    });
+    getSavedPapers.mockResolvedValueOnce([
+      {
+        paper_id: "paper-1",
+        title: "Saved paper",
+        doi: "10.1000/paper-1",
+        venue: "GraphConf",
+        status: "accepted",
+        authors: ["Ada Lovelace"],
+      },
+    ]);
+    const wrapper = mount(ResearchWorkbench);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Candidate paper title");
+    await wrapper.get(".active-candidate-card button").trigger("click");
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(acceptSessionCandidate).toHaveBeenCalledWith("default", "candidate-1");
+    expect(getSavedPapers).toHaveBeenCalledTimes(2);
+    expect(getMemorySummary).toHaveBeenCalledTimes(2);
+    expect(text).not.toContain("Candidate paper title");
+    expect(text).toContain("Saved paper");
+    expect(text).toContain("Earlier answer");
   });
 });

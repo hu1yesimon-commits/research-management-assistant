@@ -8,13 +8,18 @@ import main
 from config import config
 
 
-def test_fake_grounded_answer_generator_returns_deterministic_answer_with_sources():
+def test_fake_grounded_answer_generator_returns_concise_deterministic_answer_with_sources():
     generator = FakeGroundedAnswerGenerator()
+    long_source_text = (
+        "Graph reconstruction methods rely on structural priors. "
+        "This sentence should remain in the stored evidence panel, not be dumped into chat. "
+        "The deterministic answer should summarize the evidence and point to the source."
+    )
     chunks = [
         KnowledgeSearchResult(
             paper_id="paper-1",
             chunk_index=0,
-            text="Graph reconstruction methods rely on structural priors.",
+            text=long_source_text,
             vector_ref="chroma:research_chunks:paper-1:0:hash-a",
             distance=0.1,
             title="Paper One",
@@ -31,11 +36,12 @@ def test_fake_grounded_answer_generator_returns_deterministic_answer_with_source
 
     answer = generator.generate("How should I approach graph reconstruction?", chunks)
 
-    assert answer == (
-        "Grounded answer for 'How should I approach graph reconstruction?': "
-        "[1] Paper One chunk 0 says: Graph reconstruction methods rely on structural priors. "
-        "[2] Paper Two chunk 1 says: Recent work emphasizes interpretable retrieval pipelines."
-    )
+    assert "I found 2 saved knowledge chunks" in answer
+    assert "Paper One chunk 0" in answer
+    assert "Paper Two chunk 1" in answer
+    assert "Open the Knowledge panel for the full evidence" in answer
+    assert long_source_text not in answer
+    assert len(answer) < 650
 
 
 def test_prompt_builder_includes_question_numbered_sources_and_grounding_constraints():
@@ -68,6 +74,9 @@ def test_prompt_builder_includes_question_numbered_sources_and_grounding_constra
     assert "Recent work emphasizes interpretable retrieval pipelines." in prompt
     assert "Answer using only the sources below." in prompt
     assert "If the sources are insufficient, say that you do not know." in prompt
+    assert "Keep the answer concise and user-friendly." in prompt
+    assert "Cite source numbers like [1] when making evidence-backed claims." in prompt
+    assert "Do not quote or repeat long source passages." in prompt
 
 
 class FakeLLMClient:
@@ -147,29 +156,29 @@ def test_get_answer_generator_returns_deterministic_by_default():
 def test_get_answer_generator_builds_deepseek_openai_compatible_client(monkeypatch):
     original_provider = config.answer_provider
     original_temperature = config.answer_temperature
+    original_answer_model = config.answer_model
     original_api_key = config.deepseek_api_key
     original_base_url = config.deepseek_base_url
-    original_model = config.deepseek_model
 
     try:
         monkeypatch.setattr(main, "ChatOpenAI", FakeChatOpenAI)
         config.answer_provider = "deepseek"
+        config.answer_model = "deepseek-answer-model"
         config.answer_temperature = 0.0
         config.deepseek_api_key = "test-key"
         config.deepseek_base_url = "https://example.invalid/v1"
-        config.deepseek_model = "deepseek-chat"
 
         generator = main.get_answer_generator()
 
         assert isinstance(generator, LLMAnswerGenerator)
         assert isinstance(generator.llm_client, FakeChatOpenAI)
-        assert generator.llm_client.kwargs["model"] == "deepseek-chat"
+        assert generator.llm_client.kwargs["model"] == "deepseek-answer-model"
         assert generator.llm_client.kwargs["api_key"] == "test-key"
         assert generator.llm_client.kwargs["base_url"] == "https://example.invalid/v1"
         assert generator.llm_client.kwargs["temperature"] == 0.0
     finally:
         config.answer_provider = original_provider
         config.answer_temperature = original_temperature
+        config.answer_model = original_answer_model
         config.deepseek_api_key = original_api_key
         config.deepseek_base_url = original_base_url
-        config.deepseek_model = original_model

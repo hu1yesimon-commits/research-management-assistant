@@ -35,6 +35,16 @@ def test_get_embedding_service_returns_fake_by_default():
         config.embedding_provider = original_provider
 
 
+def test_demo_retrieval_environment_uses_persistent_embedding_provider():
+    configured = config.__class__(
+        embedding_provider="bge-m3",
+        bge_m3_model_name="BAAI/bge-m3",
+    )
+
+    assert configured.embedding_provider == "bge-m3"
+    assert configured.bge_m3_model_name == "BAAI/bge-m3"
+
+
 def test_get_embedding_service_returns_bge_m3_when_configured(tmp_path, monkeypatch):
     original_provider = config.embedding_provider
     original_model_name = config.bge_m3_model_name

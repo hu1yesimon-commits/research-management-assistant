@@ -32,7 +32,13 @@ with tempfile.TemporaryDirectory(prefix="graphreconstruction-offline-smoke-") as
 
     from fastapi.testclient import TestClient
 
-    from main import app, get_embedding_service, get_memory_store, get_vector_store_service
+    from main import (
+        app,
+        get_embedding_service,
+        get_memory_store,
+        get_paper_discovery_graph,
+        get_vector_store_service,
+    )
     from services.embedding_service import FakeEmbeddingService
     from services.memory_store import MemoryStore
     from services.schemas import JudgeResult, PaperId, PaperMetadata
@@ -43,9 +49,51 @@ with tempfile.TemporaryDirectory(prefix="graphreconstruction-offline-smoke-") as
     vector_store = FakeVectorStoreService()
     embedding_service = FakeEmbeddingService()
 
+    class OfflineDiscoveryGraph:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, state):
+            self.calls += 1
+            index = self.calls
+            paper_id = f"session-paper-{index}"
+            return {
+                **state,
+                "rewritten_queries": [state["user_query"]],
+                "raw_results": [{"paper_id": paper_id}],
+                "deduped_papers": [{"paper_id": paper_id}],
+                "ranked_candidates": [
+                    {
+                        "paper": {
+                            "paper_id": paper_id,
+                            "source_ids": {"doi": f"10.1000/{paper_id}"},
+                            "title": f"Session Paper {index}",
+                            "authors": ["Smoke Tester"],
+                            "abstract": f"Session abstract {index}",
+                            "doi": f"10.1000/{paper_id}",
+                            "venue": "SmokeConf",
+                            "source": "smoke",
+                        },
+                        "judgement": {
+                            "decision": "accept",
+                            "reason": "offline session smoke",
+                            "llm_relevance_score": 0.9,
+                            "embedding_relevance_score": 0.8,
+                            "quality_score": 0.7,
+                            "novelty_score": 0.6,
+                            "final_score": 0.75,
+                            "tags": ["smoke"],
+                        },
+                    }
+                ],
+            }
+
+    offline_discovery_graph = OfflineDiscoveryGraph()
+
     app.dependency_overrides[get_memory_store] = lambda: store
     app.dependency_overrides[get_embedding_service] = lambda: embedding_service
     app.dependency_overrides[get_vector_store_service] = lambda: vector_store
+    app.dependency_overrides[get_paper_discovery_graph] = lambda: offline_discovery_graph
 
     client = TestClient(app)
 
@@ -69,6 +117,97 @@ with tempfile.TemporaryDirectory(prefix="graphreconstruction-offline-smoke-") as
 
     health = assert_status(client.get("/health"))
     print(f"HEALTH_STATUS={health['status']}")
+
+    first_turn = assert_status(
+        client.post(
+            "/sessions/default/turns",
+            json={
+                "message": "Find recent papers about graph reconstruction",
+                "idempotency_key": "smoke-session-1",
+            },
+        )
+    )
+    first_active = assert_status(client.get("/sessions/default/candidates/active"))
+    if first_turn["status"] != "completed":
+        raise SystemExit(f"expected completed first turn, got: {first_turn}")
+    if not first_active:
+        raise SystemExit("expected active candidates after first session research turn")
+    first_candidate_ids = [candidate["id"] for candidate in first_active]
+    print(f"SESSION_TURN_STATUS={first_turn['status']}")
+
+    assert_status(
+        client.post(
+            "/sessions/default/turns",
+            json={
+                "message": "What can this research workbench do?",
+                "idempotency_key": "smoke-session-2",
+            },
+        )
+    )
+    refreshed_active = assert_status(client.get("/sessions/default/candidates/active"))
+    if any(candidate["id"] in first_candidate_ids for candidate in refreshed_active):
+        raise SystemExit("expected first session candidates to expire after the next turn")
+    print("ACTIVE_CANDIDATE_REFRESH_OK=true")
+
+    assert_status(
+        client.post(
+            "/sessions/default/turns",
+            json={
+                "message": "Find recent papers about graph reconstruction again",
+                "idempotency_key": "smoke-session-3",
+            },
+        )
+    )
+    third_active = assert_status(client.get("/sessions/default/candidates/active"))
+    if not third_active:
+        raise SystemExit("expected active candidates after third session research turn")
+
+    accepted_session_candidate = assert_status(
+        client.post(f"/sessions/default/candidates/{third_active[0]['id']}/accept")
+    )
+    saved_papers = assert_status(client.get("/papers"))
+    if accepted_session_candidate["status"] != "accepted":
+        raise SystemExit(
+            f"expected accepted session candidate, got: {accepted_session_candidate}"
+        )
+    if not any(
+        paper["paper_id"] == accepted_session_candidate["paper_id"]
+        and paper["status"] == "accepted"
+        for paper in saved_papers
+    ):
+        raise SystemExit(f"expected accepted paper in /papers, got: {saved_papers}")
+
+    history = assert_status(client.get("/sessions/default/messages"))
+    if len(history["items"]) != 6:
+        raise SystemExit(f"expected 6 session messages, got: {len(history['items'])}")
+    if [message["role"] for message in history["items"]] != ["user", "assistant"] * 3:
+        raise SystemExit(f"expected paired user/assistant messages, got: {history['items']}")
+
+    assistant_v1 = assert_status(
+        client.post(
+            "/research/assistant",
+            json={"query": "Find fresh papers for graph reconstruction", "top_k": 5},
+        )
+    )
+    required_assistant_fields = {
+        "mode",
+        "route",
+        "coverage_score",
+        "assistant_message",
+        "next_action",
+        "discovery",
+        "knowledge",
+        "ideas",
+        "errors",
+    }
+    if not required_assistant_fields.issubset(assistant_v1):
+        raise SystemExit(
+            f"expected V1 assistant compatibility fields, got: {assistant_v1.keys()}"
+        )
+
+    print(f"SESSION_MESSAGE_COUNT={len(history['items'])}")
+    print(f"SESSION_CANDIDATE_ACCEPTED_STATUS={accepted_session_candidate['status']}")
+    print("AGENT_TEAM_V3_SMOKE_OK=true")
 
     for _ in range(3):
         created = assert_status(client.post("/experiments/logs", json=experiment_log))

@@ -62,7 +62,7 @@ describe("AssistantWorkflowPanel", () => {
     expect(wrapper.emitted("success")).toEqual([[assistantResponse]]);
   });
 
-  test("renders assistant workflow response details", async () => {
+  test("renders the compact assistant workflow form response", async () => {
     const wrapper = mountPanel({
       props: {
         runAssistant: vi.fn().mockResolvedValue(assistantResponse),
@@ -77,42 +77,9 @@ describe("AssistantWorkflowPanel", () => {
     expect(text).toContain("route: advanced_search");
     expect(text).toContain("72%");
     expect(text).toContain("I can search with local context and discovery together.");
-    expect(text).toContain("Review the recommended papers.");
-    expect(text).toContain("Review top papers");
-    expect(text).toContain("Upload selected PDFs");
-    expect(text).toContain("multi_search: discovery unavailable");
-    expect(text).toContain("Try a smaller validation slice");
-    expect(text).toContain("It reduces experiment cost.");
-    expect(text).toContain("accuracy@10");
-    expect(text).toContain("Run one baseline comparison.");
-  });
-
-  test("renders structured next-action option labels", async () => {
-    const structuredResponse = {
-      ...assistantResponse,
-      next_action: {
-        type: "choose_path",
-        message: "Choose the next workflow step.",
-        options: [
-          {
-            id: "continue_search",
-            label: "Search papers",
-            request_patch: { intent: "search" },
-          },
-        ],
-      },
-    };
-    const wrapper = mountPanel({
-      props: {
-        runAssistant: vi.fn().mockResolvedValue(structuredResponse),
-      },
-    });
-
-    await wrapper.find("#assistant-query").setValue("local evidence");
-    await wrapper.find("form.assistant-form").trigger("submit.prevent");
-
-    expect(wrapper.text()).toContain("option: Search papers");
-    expect(wrapper.text()).not.toContain("[object Object]");
+    expect(text).not.toContain("Next Action");
+    expect(text).not.toContain("Suggested Actions");
+    expect(text).not.toContain("Workflow Notes");
   });
 
   test("renders endpoint errors without emitting success", async () => {
