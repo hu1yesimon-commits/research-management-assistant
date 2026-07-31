@@ -1,0 +1,39 @@
+{
+  "dataset": "research-agent-gold",
+  "version": "0.2.0-draft",
+  "profile": "contract_probe",
+  "cases": [
+    {
+      "case_id": "exp-supported-precision-001",
+      "state": {
+        "intent": "experiment_improvement",
+        "attempted_methods": ["focal loss"],
+        "observed_results": ["recall increased", "precision decreased"],
+        "decisions": ["preserve recall"],
+        "unresolved_problems": ["recover precision without sacrificing recall"],
+        "source_message_ids": [101]
+      },
+      "route": {
+        "route": "experiment_improvement",
+        "actions": []
+      },
+      "retrieval": {
+        "retrieved_chunk_ids": [
+          "chunk-calibration-1",
+          "chunk-augmentation-noise-1"
+        ]
+      },
+      "answer": {
+        "covered_required_points": [
+          "propose a threshold calibration experiment",
+          "preserve recall as an explicit acceptance constraint"
+        ],
+        "detected_forbidden_claims": [],
+        "citation_ids": ["chunk-calibration-1"],
+        "warned": false,
+        "unsupported_claim_count": 0,
+        "summary_as_evidence_violation": false
+      }
+    }
+  ]
+}
