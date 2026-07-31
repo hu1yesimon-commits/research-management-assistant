@@ -31,6 +31,25 @@ Optional real providers (must pass the rollout register before being treated as 
 - `EMBEDDING_PROVIDER=bge-m3` plus `VECTOR_BACKEND=chroma` for persistent local semantic retrieval.
 - arXiv/OpenAlex for external discovery and metadata enrichment.
 
+## Deterministic Research-Agent Evaluation
+
+The first evaluator harness consumes version-matched Gold scenarios and structured
+observation artifacts. It checks state labels, routes and forbidden actions,
+retrieved chunk IDs, citations, warnings, and unsupported-claim hard gates without
+network access:
+
+```bash
+PYTHONPATH=backend/src RUNTIME_PROFILE=test ./.venv/bin/python -m evals \
+  --gold docs/superpowers/evals/research-agent-gold-v0.json \
+  --observed backend/src/evals/fixtures/research-agent-contract-probe-v0.json
+```
+
+The tracked observation file is a synthetic `contract_probe` that validates the
+harness and CI wiring. It is not a V3 runtime result or a model-quality score.
+Reports keep `performance_claim_valid=false` while the Gold set remains
+`human_review_required`. Runtime adapters and semantic answer judges remain separate
+follow-up increments.
+
 Runtime profiles:
 
 - `RUNTIME_PROFILE=test`: automated tests force fake/deterministic providers before application modules are imported.

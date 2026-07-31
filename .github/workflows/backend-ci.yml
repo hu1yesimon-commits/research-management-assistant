@@ -37,6 +37,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev
 
+      - name: Validate deterministic evaluator contract
+        run: >-
+          uv run --no-sync python -m evals
+          --gold docs/superpowers/evals/research-agent-gold-v0.json
+          --observed backend/src/evals/fixtures/research-agent-contract-probe-v0.json
+
       - name: Run backend tests
         run: uv run --no-sync pytest -q backend/src/tests
 
