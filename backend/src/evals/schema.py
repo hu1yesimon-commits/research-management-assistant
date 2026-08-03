@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+DeterministicScope = Literal["state", "route", "retrieval", "answer"]
 Scope = Literal["state", "route", "retrieval", "answer", "ablation", "e2e"]
 Route = Literal[
     "direct_reply",
@@ -256,16 +257,40 @@ class AnswerObservation(StrictModel):
 
 class CaseObservation(StrictModel):
     case_id: str
+    scopes: list[DeterministicScope] = Field(min_length=1)
     state: dict[str, object] | None = None
     route: RouteObservation | None = None
     retrieval: RetrievalObservation | None = None
     answer: AnswerObservation | None = None
 
     @model_validator(mode="after")
-    def validate_state_fields(self) -> CaseObservation:
-        if self.state is None:
-            return self
-        _validate_state_values(self.state, "observed")
+    def validate_selected_scopes(self) -> CaseObservation:
+        if len(self.scopes) != len(set(self.scopes)):
+            raise ValueError("observation scopes must be unique")
+        observed_by_scope = {
+            "state": self.state,
+            "route": self.route,
+            "retrieval": self.retrieval,
+            "answer": self.answer,
+        }
+        provided_scopes = {
+            scope for scope, observed in observed_by_scope.items() if observed is not None
+        }
+        selected_scopes = set(self.scopes)
+        if provided_scopes != selected_scopes:
+            missing = sorted(selected_scopes - provided_scopes)
+            unselected = sorted(provided_scopes - selected_scopes)
+            details = []
+            if missing:
+                details.append("missing selected observations: " + ", ".join(missing))
+            if unselected:
+                details.append(
+                    "observations provided outside selected scopes: "
+                    + ", ".join(unselected)
+                )
+            raise ValueError("; ".join(details))
+        if self.state is not None:
+            _validate_state_values(self.state, "observed")
         return self
 
 

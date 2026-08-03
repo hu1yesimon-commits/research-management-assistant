@@ -115,6 +115,7 @@ def test_contract_probe_exercises_all_deterministic_scopes(gold):
     assert report.hard_gates_passed is True
     assert report.performance_claim_valid is False
     assert report.evaluated_case_count == 1
+    assert report.evaluated_scopes == ["answer", "retrieval", "route", "state"]
     assert report.component_scores["state"]["critical_field_recall"] == 1.0
     assert report.component_scores["state"]["labeled_exact_match_rate"] == 1.0
     assert report.component_scores["route"]["exact_match_rate"] == 1.0
@@ -217,6 +218,30 @@ def test_unadjudicated_nonempty_state_fact_fails(gold):
 
 
 def test_missing_scoped_observation_fails_case(gold):
+    with pytest.raises(
+        ValidationError,
+        match="missing selected observations: state",
+    ):
+        ObservationDataset.model_validate(
+            {
+                "dataset": gold.dataset,
+                "version": gold.version,
+                "profile": "runtime",
+                "cases": [
+                    {
+                        "case_id": "exp-supported-precision-001",
+                        "scopes": ["state", "route"],
+                        "route": {
+                            "route": "experiment_improvement",
+                            "actions": [],
+                        },
+                    }
+                ],
+            }
+        )
+
+
+def test_evaluator_rejects_scope_absent_from_gold_case(gold):
     observations = ObservationDataset.model_validate(
         {
             "dataset": gold.dataset,
@@ -224,25 +249,21 @@ def test_missing_scoped_observation_fails_case(gold):
             "profile": "runtime",
             "cases": [
                 {
-                    "case_id": "exp-supported-precision-001",
-                    "route": {
-                        "route": "experiment_improvement",
-                        "actions": [],
+                    "case_id": "exp-missing-context-clarify-003",
+                    "scopes": ["answer"],
+                    "answer": {
+                        "covered_required_points": [],
+                        "detected_forbidden_claims": [],
+                        "citation_ids": [],
+                        "warned": False,
                     },
                 }
             ],
         }
     )
 
-    report = evaluate_dataset(gold, observations)
-
-    assert report.hard_gates_passed is False
-    assert report.hard_gate_summary["failed_case_count"] == 1
-    assert {
-        scope.scope
-        for scope in report.cases[0].scopes
-        if not scope.hard_gates_passed
-    } == {"state", "retrieval", "answer"}
+    with pytest.raises(ValueError, match="selects scopes absent from Gold"):
+        evaluate_dataset(gold, observations)
 
 
 def test_cli_writes_machine_readable_report(tmp_path):
