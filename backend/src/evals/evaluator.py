@@ -57,6 +57,7 @@ class EvaluationReport(EvalModel):
     schema_valid: bool
     hard_gates_passed: bool
     evaluated_case_count: int
+    evaluated_scopes: list[str]
     hard_gate_summary: dict[str, int]
     component_scores: dict[str, object]
     cases: list[CaseResult]
@@ -353,19 +354,9 @@ def evaluate_case(case: GoldCase, observation: CaseObservation) -> CaseResult:
         "retrieval": evaluate_retrieval,
         "answer": evaluate_answer,
     }
-    for scope, evaluator in evaluators.items():
-        if scope not in case.scope:
-            continue
+    for scope in observation.scopes:
+        evaluator = evaluators[scope]
         observed = observed_by_scope[scope]
-        if observed is None:
-            scopes.append(
-                ScopeResult(
-                    scope=scope,
-                    hard_gates_passed=False,
-                    violations=[f"missing {scope} observation"],
-                )
-            )
-            continue
         scopes.append(evaluator(case, observed))
 
     return CaseResult(
@@ -415,6 +406,14 @@ def evaluate_dataset(
         raise ValueError(
             "observation contains unknown case ids: " + ", ".join(unknown_case_ids)
         )
+    for observation in observations.cases:
+        gold_case = gold_by_id[observation.case_id]
+        invalid_scopes = sorted(set(observation.scopes) - set(gold_case.scope))
+        if invalid_scopes:
+            raise ValueError(
+                f"observation case {observation.case_id} selects scopes absent from Gold: "
+                + ", ".join(invalid_scopes)
+            )
     case_results = [
         evaluate_case(gold_by_id[observation.case_id], observation)
         for observation in observations.cases
@@ -477,6 +476,16 @@ def evaluate_dataset(
     hard_gates_passed = bool(case_results) and all(
         result.hard_gates_passed for result in case_results
     )
+    evaluated_scopes = sorted(
+        {scope for observation in observations.cases for scope in observation.scopes}
+    )
+    observations_by_id = {
+        observation.case_id: observation for observation in observations.cases
+    }
+    complete_scope_coverage = set(observations_by_id) == set(gold_by_id) and all(
+        set(observations_by_id[case.case_id].scopes) == set(case.scope)
+        for case in gold.cases
+    )
     return EvaluationReport(
         dataset=gold.dataset,
         gold_version=gold.version,
@@ -488,6 +497,7 @@ def evaluate_dataset(
             and gold.status == "frozen"
             and bool(observations.cases)
             and {case.case_id for case in observations.cases} == set(gold_by_id)
+            and complete_scope_coverage
             and {
                 scope for case in gold.cases for scope in case.scope
             }.issubset(SUPPORTED_SCOPES)
@@ -495,6 +505,7 @@ def evaluate_dataset(
         schema_valid=True,
         hard_gates_passed=hard_gates_passed,
         evaluated_case_count=len(case_results),
+        evaluated_scopes=evaluated_scopes,
         hard_gate_summary=hard_gate_summary,
         component_scores=component_scores,
         cases=case_results,

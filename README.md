@@ -47,7 +47,30 @@ PYTHONPATH=backend/src RUNTIME_PROFILE=test ./.venv/bin/python -m evals \
 The tracked observation file is a synthetic `contract_probe` that validates the
 harness and CI wiring. It is not a V3 runtime result or a model-quality score.
 Reports keep `performance_claim_valid=false` while the Gold set remains
-`human_review_required`. Runtime adapters and semantic answer judges remain separate
+`human_review_required`.
+
+The route-only V3 adapter runs the current deterministic Leader against all eight
+Gold cases that carry Route labels. It uses each Gold message and whether its fixed
+retrieval fixture returned any chunks; it does not read `expected_route`, inspect
+relevance labels, invent an `experiment_log`, or call the dispatcher:
+
+```bash
+PYTHONPATH=backend/src RUNTIME_PROFILE=test ./.venv/bin/python \
+  -m evals.runtime_route_adapter \
+  --gold docs/superpowers/evals/research-agent-gold-v0.json \
+  --output /tmp/v3-route-runtime-observations.json
+
+PYTHONPATH=backend/src RUNTIME_PROFILE=test ./.venv/bin/python -m evals \
+  --gold docs/superpowers/evals/research-agent-gold-v0.json \
+  --observed /tmp/v3-route-runtime-observations.json \
+  --output /tmp/v3-route-runtime-report.json
+```
+
+The second command intentionally exits nonzero for the current baseline because six
+of eight Route cases violate hard gates. Route Exact Match is `0.25`; only the
+missing-context clarification and explicit fresh-discovery cases match. This is a
+draft component baseline, not a complete Agent or model performance result.
+State, retrieval, answer, ablation, and end-to-end runtime adapters remain separate
 follow-up increments.
 
 Runtime profiles:

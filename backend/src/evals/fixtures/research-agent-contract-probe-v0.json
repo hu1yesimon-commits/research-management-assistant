@@ -5,6 +5,7 @@
   "cases": [
     {
       "case_id": "exp-supported-precision-001",
+      "scopes": ["state", "route", "retrieval", "answer"],
       "state": {
         "intent": "experiment_improvement",
         "attempted_methods": ["focal loss"],

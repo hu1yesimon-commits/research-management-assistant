@@ -3,12 +3,12 @@
 ## Current snapshot
 
 - Goal: build a stable, bounded research workflow whose natural-language state, routes, retrieval, grounded answers, and user-controlled persistence can be evaluated separately and end to end.
-- Current validated capability: the deterministic evaluator now validates Gold and structured observation schemas, scores state/route/retrieval/answer observations, enforces hard gates, and runs a synthetic contract probe in CI without network access.
-- Current increment: deterministic observed-output evaluator harness and CI contract probe.
+- Current validated capability: a route-only runtime adapter now runs the current V3 deterministic Planner against all eight Route-labeled Gold cases without network or label leakage; the honest draft baseline is 2/8 Route Exact Match.
+- Current increment: scope-selective evaluation and V3 deterministic Planner Route baseline.
 - Architecture level: strengthened at configuration and evaluation boundaries; unchanged at workflow orchestration and Provider selection.
 - Key constraints: context is not evidence; only retrieved chunks support paper claims; persistent actions require user control; ordinary tests must not inherit personal real-provider settings.
-- Open risks: Gold labels still require human review; current V3 plan types, state representation, chunk identity, and answer schema do not yet map directly to the Gold observation contract; real Provider behavior remains unvalidated.
-- Next decision: align one V3 runtime path to the observation contract and produce the first honest draft baseline before choosing a real Provider smoke.
+- Open risks: Gold labels still require human review; six Route cases currently fail; `idea` and `research_then_idea` do not prove one Gold business Route; State, Chunk ID, Answer, ablation, and end-to-end runtime adapters remain absent.
+- Next decision: decide whether to fix the smallest existing Route boundary—Chinese local-only/no-network Knowledge QA—or validate another component before changing Planner behavior.
 - Last updated: 2026-07-31
 
 ## Active assumptions
@@ -16,7 +16,7 @@
 | ID | Assumption | Evidence needed | Status |
 | --- | --- | --- | --- |
 | A-001 | Session Summary improves research alignment with less noise than raw messages. | Paired ablation on fixed scenarios, chunks, prompts, and repeated runs. | open |
-| A-002 | One shared scenario corpus can support component, workflow, and end-to-end evaluation without hiding failure causes. | Run the implemented state, route, retrieval, and answer evaluators on V3 runtime observations and inspect failure localization. | partially supported |
+| A-002 | One shared scenario corpus can support component, workflow, and end-to-end evaluation without hiding failure causes. | Add a second runtime component view and confirm that its failures remain independently attributable. | partially supported |
 | A-003 | Experiment Improvement is the best first vertical workflow for testing summary, preference, retrieval, answer, and fallback boundaries together. | Human label review and first evaluator results. | open |
 | A-004 | One-dimensional time-series classification and localization cases are representative enough for the first domain-focused Gold Set. | User review of scenario realism and missing failure modes. | open |
 | A-005 | Explicit runtime profiles prevent personal real-provider settings from contaminating ordinary tests and offline development. | Profile-switch tests, full backend tests without Provider overrides, and offline smoke. | supported |
@@ -76,6 +76,15 @@
 - Decision: make the first evaluator a pure observed-output scorer with strict Gold and observation schemas; add runtime adapters only after each mapping is explicit and tested.
 - Consequences: the CI contract probe validates evaluator behavior but is not a runtime or model-quality result.
 - Revisit when: V3 exposes stable state, route, chunk identity, and grounded-answer observation contracts.
+
+### D-007 — 2026-07-31 — Keep the first runtime adapter route-only and conservative
+
+- Context: V3 exposes a stable typed `LeaderPlan`, but its plan vocabulary does not prove every Gold business Route.
+- Options considered: map every plan type to the nearest Gold label; change Planner behavior while adding the adapter; map only plan types whose authorized steps prove one route.
+- Evidence: `direct_reply`, `clarify`, `research`, and `knowledge_qa` have unambiguous bounded steps; `idea` does not prove State or evidence gates; `research_then_idea` does not distinguish discovery-with-knowledge from discovery fallback.
+- Decision: generate Route observations only from the four proven plan types and raise an explicit unmappable error for `idea` and `research_then_idea`; evaluate only the declared Route scope.
+- Consequences: the baseline can fail honestly without missing State, Retrieval, or Answer observations contaminating its Route metrics.
+- Revisit when: runtime contracts expose explicit business Route and evidence-sufficiency outcomes.
 
 ## Delivered increments
 
@@ -148,3 +157,24 @@
 - Results: all checks passed; 502 backend tests passed with one existing Starlette deprecation warning; offline smoke passed; the contract probe passed its hard gates.
 - Known limitations: the Gold set remains `human_review_required`; `performance_claim_valid` is therefore false; no V3 runtime observation adapter, semantic answer judge, ablation, or real Provider score was produced.
 - Next candidate increment: define one explicit V3-to-Gold adapter boundary and produce a draft runtime baseline without changing the Gold labels.
+
+### I-005 — 2026-07-31 — Produce the V3 Route runtime baseline
+
+- Confirmed scope: add scope-selective evaluator observations and a route-only adapter for the current deterministic Planner; do not modify Planner rules, infer missing experiment logs, call Providers, dispatch Agents, or write runtime state.
+- Changes:
+  - Added explicit selected scopes to each observation case and required exact correspondence between selected scopes and provided observations.
+  - Updated the evaluator to score only selected Gold views and report evaluated scopes.
+  - Added a conservative V3 Route adapter for `direct_reply`, `clarify`, `research`, and `knowledge_qa`.
+  - Made `idea` and `research_then_idea` explicitly unmappable instead of silently assigning stronger Gold business semantics.
+  - Added an offline CLI that generates an eight-case `profile=runtime` Route observation artifact from Gold messages and raw retrieval-fixture presence.
+  - Documented the expected nonzero evaluator exit for the current failing baseline.
+- Tests executed:
+  - Ruff on evaluator, adapter, and focused tests.
+  - Twenty-seven focused schema, evaluator, scope-selection, adapter, label-leakage, CLI, and baseline tests.
+  - Direct runtime Route artifact generation and evaluator report inspection under `RUNTIME_PROFILE=test`.
+  - Full backend suite under `PYTHONPATH=backend/src RUNTIME_PROFILE=test`.
+  - Offline MVP and Agent Team V3 smoke.
+  - `git diff --check`.
+- Results: all implementation checks passed; 513 backend tests passed with one existing Starlette deprecation warning; offline smoke passed. The draft Route baseline evaluated eight cases, passed two, failed six, and reported Route Exact Match `0.25`.
+- Known limitations: Gold remains `human_review_required`; `performance_claim_valid=false`; this is a Planner Route component result, not an Agent journey or model-quality score.
+- Next candidate increment: validate and, after a new confirmation checkpoint, fix case `exp-localization-local-only-insufficient-009`, which should use the existing `knowledge_qa` route for explicit local-only/no-network requests even when retrieval is empty.
